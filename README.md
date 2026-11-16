@@ -14,7 +14,30 @@
 
 ---
 
-## 一、在 1Panel 中安装（推荐）
+## 零、直接拉镜像部署（最简单，推荐）
+
+镜像已由 GitHub Actions 自动构建并发布到 GHCR（公开，无需登录即可拉取）：
+
+```
+ghcr.io/timwoo086/noteweb:latest
+```
+
+**在 1Panel 里：** 左侧「容器」→「编排」→「创建编排」，把本仓库的 `compose.yaml` 内容粘贴进去，点「启动」即可。服务器无需源码、无需构建。
+
+**或用命令行：**
+
+```bash
+# 把 compose.yaml 放到任意目录，然后：
+docker compose -f compose.yaml up -d
+```
+
+部署后访问 `http://服务器IP:5000`，默认密码 `admin`（可用环境变量 `APP_PASSWORD` 修改）。数据与封面持久化在 `./data` 目录。
+
+> 每次 push 到 GitHub main 分支会自动重建并更新 `latest` 镜像；服务器执行 `docker compose pull && docker compose up -d` 即可升级。
+
+---
+
+## 一、在 1Panel 中安装（本地应用包方式，可选）
 
 本项目是符合 1Panel 规范的**本地应用包**。安装步骤如下：
 
