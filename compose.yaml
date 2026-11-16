@@ -1,23 +1,63 @@
-# 从 GitHub Container Registry 拉取预构建镜像，无需构建、无需源码
-# 用法：docker compose -f compose.yaml up -d
+# ============================================================
+# 影片库 JavLib —— 直接拉取预构建镜像部署
+#
+# 镜像托管在 GitHub Container Registry (ghcr.io)，由 GitHub Actions
+# 在每次 push 到 main 分支时自动构建，公开可拉取，服务器无需登录。
+#
+# 部署方式二选一：
+#   1) 1Panel：容器 → 编排 → 创建编排，把本文件内容粘贴进去，点「启动」
+#   2) 命令行：把本文件放到任意目录，执行 docker compose up -d
+#
+# 部署后访问：http://服务器IP:5000   默认密码：admin
+# ============================================================
+
 services:
   javlib:
+    # 镜像地址：组织/用户名/仓库名:标签。latest 会随 GitHub 新提交自动更新。
+    # 若需固定版本避免使用 :latest，可改成具体 tag（如 sha 值 38411f5）。
     image: ghcr.io/timwoo086/noteweb:latest
+
+    # 容器名称，方便 docker ps / docker logs 时用名字操作
     container_name: javlib
+
+    # 重启策略：除非手动停止，否则开机自启、异常退出自动拉起
     restart: unless-stopped
+
+    # 端口映射："宿主机端口:容器端口"
+    # 冒号左边 5000 是对外访问端口，改这里即可换端口（如 "8080:5000"）；
+    # 冒号右边 5000 是容器内 Flask 服务端口，保持不动。
     ports:
       - "5000:5000"
+
+    # 数据持久化："宿主机路径:容器路径"
+    # 数据库(movies.db)和封面图片(covers/)都存在这里，容器删除重建也不会丢。
+    # 升级时只要保留 ./data 目录，数据即可延续。
     volumes:
       - ./data:/app/data
+
+    # 环境变量：等号左边是变量名，右边 ${变量:-默认值} 表示可用外部同名的
+    # .env 文件或系统环境变量覆盖，没设置时用 :- 后面的默认值。
     environment:
+      # 网页登录密码，部署前建议改成自己的（在 .env 里写 APP_PASSWORD=xxx）
       APP_PASSWORD: ${APP_PASSWORD:-admin}
+      # Flask session 签名密钥，正式使用建议改成一段随机长字符串
       SECRET_KEY: ${SECRET_KEY:-javlib-change-this-secret-key}
+      # 可选代理：服务器能直连 javbus/javdb 时留空；否则填 http://代理IP:端口
       HTTP_PROXY: ${HTTP_PROXY:-}
+      # 容器内数据目录，与上面 volumes 的挂载目标一致，不要改动
       DATA_DIR: /app/data
+      # 容器内监听端口，与 ports 右侧一致，不要改动
       PORT: 5000
+
+    # 健康检查：定期访问 /login 判断服务是否正常，便于 1Panel 显示运行状态
     healthcheck:
+      # 每 30 秒检查一次，超时 5 秒算失败，连续 3 次失败标记为不健康
+      # start_period 给容器 10 秒启动缓冲期，期间不计数
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
+
+# 升级镜像：docker compose pull && docker compose up -d
+# 查看日志：docker logs -f javlib
