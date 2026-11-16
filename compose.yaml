@@ -1,0 +1,23 @@
+# 从 GitHub Container Registry 拉取预构建镜像，无需构建、无需源码
+# 用法：docker compose -f compose.yaml up -d
+services:
+  javlib:
+    image: ghcr.io/timwoo086/noteweb:latest
+    container_name: javlib
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-admin}
+      SECRET_KEY: ${SECRET_KEY:-javlib-change-this-secret-key}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      DATA_DIR: /app/data
+      PORT: 5000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
