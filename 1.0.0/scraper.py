@@ -55,7 +55,37 @@ ACTRESS_CN_MAP = {
     "戸田真琴": "户田真琴", "户田真琴": "户田真琴",
     "涼森れむ": "凉森梦", "涼森れむ": "凉森梦",
     "関根和美": "关根和美", "關根和美": "关根和美",
+    # 常用罗马字 / 日文写法 -> 中文名（用于抓取后给候选）
+    "RION": "梨音", "りおん": "梨音", "梨音": "梨音",
+    "AIKA": "爱花", "あいか": "爱花",
+    "MEI": "芽衣", "めい": "芽衣",
+    "RIO": "里欧", "りお": "里欧",
+    "MOMO": "桃谷", "もも": "桃谷",
 }
+
+
+def actress_candidates(name, aliases=None):
+    """返回某演员的可选名字列表：中文名优先，其次同译名的日文/罗马字写法与别名组。"""
+    cn = to_chinese(name)
+    pool = []
+    if cn:
+        pool.append(cn)
+    # 同一中文译名对应的所有原文写法（如 梨音 <- RION / りおん）
+    for key, value in ACTRESS_CN_MAP.items():
+        if value == cn and key not in pool:
+            pool.append(key)
+    # 用户在「演员别名」里手动归过的组
+    for g in aliases or []:
+        members = [g.get("name", "")] + list(g.get("aliases", []))
+        if name in members or cn in members:
+            for m in members:
+                for v in (to_chinese(m), m):
+                    if v and v not in pool:
+                        pool.append(v)
+            break
+    if name and name not in pool:
+        pool.append(name)
+    return pool
 
 
 def to_chinese(name):

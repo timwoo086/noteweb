@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ movie.code }} - 影片库</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><a class="brand-link" href="/">影片库</a> <span class="brand-sep">/</span> <span class="brand-code">{{ movie.code }}</span></div>
+  <div class="topbar-actions">
+    <button class="btn-ghost" id="editBtn">编辑</button>
+    <a class="btn-ghost" href="/">返回列表</a>
+    <a class="btn-ghost" href="{{ url_for('logout') }}">退出</a>
+  </div>
+</header>
+
+<main class="detail-page">
+  <div class="detail-card">
+    <div class="detail-cover-col">
+      {% if movie.cover_path %}
+        <img class="detail-cover" src="/covers/{{ movie.cover_path | urlencode }}" alt="{{ movie.code }} 封面">
+      {% elif movie.cover_url %}
+        <img class="detail-cover" src="{{ movie.cover_url }}" alt="{{ movie.code }} 封面" referrerpolicy="no-referrer">
+      {% else %}
+        <div class="detail-cover detail-cover-empty">暂无封面</div>
+      {% endif %}
+      <div class="detail-cover-actions">
+        <button class="btn-primary" id="copyBtn" data-url="{{ movie.download_url }}" {% if not movie.download_url %}disabled{% endif %}>复制下载地址</button>
+      </div>
+    </div>
+
+    <div class="detail-info-col">
+      <div class="detail-head">
+        <span class="detail-code">{{ movie.code }}</span>
+        <h1 class="detail-title">{{ movie.title }}</h1>
+      </div>
+
+      <div class="detail-tags">
+        {% if movie.resolution %}<span class="tag tag-res">{{ movie.resolution }}</span>{% endif %}
+        {% if movie.is_original %}<span class="tag tag-original">原档</span>{% endif %}
+        {% if movie.is_remux %}<span class="tag tag-remux">REMUX</span>{% endif %}
+        {% if movie.framerate %}<span class="tag tag-fps">{{ movie.framerate }}</span>{% endif %}
+      </div>
+
+      <table class="detail-table">
+        <tbody>
+          <tr>
+            <th>演员</th>
+            <td>
+              {% if movie.actress %}
+                {% for a in movie.actress %}
+                  <a class="detail-actress" href="/?actress={{ a | urlencode }}">{{ a }}</a>{% if not loop.last %}　{% endif %}
+                {% endfor %}
+              {% else %}-{% endif %}
+            </td>
+          </tr>
+          <tr><th>发行时间</th><td>{{ movie.release_date or '-' }}</td></tr>
+          <tr><th>录入时间</th><td>{{ movie.added_at or '-' }}</td></tr>
+          <tr><th>分辨率</th><td>{{ movie.resolution or '-' }}</td></tr>
+          <tr><th>帧率</th><td>{{ movie.framerate or '-' }}</td></tr>
+          <tr><th>原档</th><td>{{ '是' if movie.is_original else '否' }}</td></tr>
+          <tr><th>REMUX</th><td>{{ '是' if movie.is_remux else '否' }}</td></tr>
+          <tr><th>数据来源</th><td>{{ movie.source or '-' }}</td></tr>
+          {% if movie.note %}<tr><th>备注</th><td>{{ movie.note }}</td></tr>{% endif %}
+        </tbody>
+      </table>
+
+      <div class="detail-download">
+        <div class="detail-label">下载地址</div>
+        {% if movie.download_url %}
+          <div class="detail-url" id="downloadUrl">{{ movie.download_url }}</div>
+        {% else %}
+          <div class="detail-url detail-url-empty">尚未录入，点右上角「编辑」补充。</div>
+        {% endif %}
+      </div>
+
+      <div class="detail-foot-links">
+        <a href="/">← 返回影片库</a>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+<script src="{{ url_for('static', filename='detail.js') }}"></script>
+</body>
+</html>

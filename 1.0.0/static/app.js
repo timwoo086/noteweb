@@ -5,6 +5,7 @@ let currentDateField = 'added_at';
 let editingId = null;
 let lastScrapedCover = '';
 let lastScrapedCoverUrl = '';
+let actressOptions = [];
 
 function toast(msg) {
   const el = $('toast');
@@ -98,13 +99,13 @@ function renderMovies(movies) {
       `<span class="actress-link" data-actress="${escapeHtml(a)}" title="点击筛选该演员">${escapeHtml(a)}</span>`
     ).join('、');
     card.innerHTML = `
-      <div class="cover-wrap">
+      <a class="cover-wrap detail-link" href="/movie/${m.id}" title="查看详情">
         ${cover}
         <span class="code-badge">${escapeHtml(m.code)}</span>
         ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
-      </div>
+      </a>
       <div class="card-body">
-        <div class="card-title">${escapeHtml(m.title) || '&nbsp;'}</div>
+        <a class="card-title detail-link" href="/movie/${m.id}" title="查看详情">${escapeHtml(m.title) || '&nbsp;'}</a>
         <div class="card-actress">${actressLinks || '&nbsp;'}</div>
         <div class="card-dates">
           <span>发行 <b>${escapeHtml(m.release_date) || '-'}</b></span>
@@ -221,6 +222,8 @@ function openModal(id = null) {
   $('fOriginal').checked = false;
   $('fRemux').checked = false;
   $('deleteBtn').hidden = !id;
+  actressOptions = [];
+  renderActressOptions();
 
   if (id) {
     api('/api/movies/' + id).then(res => {
@@ -241,6 +244,7 @@ function openModal(id = null) {
       lastScrapedCover = m.cover_path || '';
       lastScrapedCoverUrl = m.cover_url || '';
       if (m.cover_path || m.cover_url) showPreview(m);
+      loadCandidatesForCurrentActress();
     });
   }
   $('modal').hidden = false;
@@ -270,6 +274,65 @@ function showPreview(data) {
   $('preview').hidden = false;
 }
 
+// 抓取到的演员名如果有多个写法，列出来让用户手动点选（中文名排在最前）
+function currentActressList() {
+  return $('fActress').value.split(/[,，、]/).map(s => s.trim()).filter(Boolean);
+}
+
+function renderActressOptions() {
+  const box = $('actressOptions');
+  box.innerHTML = '';
+  if (!actressOptions.length) { box.hidden = true; return; }
+
+  const title = document.createElement('div');
+  title.className = 'actress-options-title';
+  title.textContent = '演员名字可点选（默认已转成中文名）';
+  box.appendChild(title);
+
+  actressOptions.forEach((item, index) => {
+    const row = document.createElement('div');
+    row.className = 'actress-option-row';
+    const label = document.createElement('span');
+    label.className = 'actress-option-label';
+    label.textContent = item.original + '：';
+    row.appendChild(label);
+
+    const current = currentActressList()[index] || item.candidates[0];
+    item.candidates.forEach(name => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'actress-option-btn' + (name === current ? ' active' : '');
+      btn.textContent = name;
+      btn.addEventListener('click', () => {
+        const list = currentActressList();
+        while (list.length < actressOptions.length) {
+          list.push(actressOptions[list.length].candidates[0]);
+        }
+        list[index] = name;
+        $('fActress').value = list.join(',');
+        row.querySelectorAll('.actress-option-btn').forEach(b => b.classList.toggle('active', b === btn));
+      });
+      row.appendChild(btn);
+    });
+    box.appendChild(row);
+  });
+  box.hidden = false;
+}
+
+async function loadCandidatesForCurrentActress() {
+  // 编辑旧记录时，也给已有演员名取候选，方便直接改成中文名
+  const names = currentActressList();
+  if (!names.length) { actressOptions = []; renderActressOptions(); return; }
+  const results = await Promise.all(names.map(name =>
+    api('/api/actress-candidates?name=' + encodeURIComponent(name))
+  ));
+  actressOptions = results.map((res, i) => ({
+    original: names[i],
+    candidates: (res && res.candidates) || [names[i]]
+  }));
+  renderActressOptions();
+}
+
 async function doFetch() {
   const code = $('fCode').value.trim();
   if (!code) { toast('请先输入编号'); return; }
@@ -291,6 +354,8 @@ async function doFetch() {
   $('fCode2').value = d.code;
   $('fTitle').value = d.title;
   $('fActress').value = (d.actress || []).join(', ');
+  actressOptions = d.actress_options || [];
+  renderActressOptions();
   $('fRelease').value = d.release_date || '';
   lastScrapedCover = d.cover_path || '';
   lastScrapedCoverUrl = d.cover_url || '';
@@ -497,5 +562,8 @@ async function init() {
   bind();
   await loadActresses();
   await loadMovies();
+  // 从详情页点「编辑」回来时自动打开对应弹窗
+  const editId = new URLSearchParams(location.search).get('edit');
+  if (editId) openModal(Number(editId));
 }
 init();

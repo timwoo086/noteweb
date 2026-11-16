@@ -95,7 +95,25 @@ def api_aliases():
 def api_scrape():
     data = request.get_json(silent=True) or {}
     result = scraper.scrape(data.get("code", ""))
+    aliases = db.load_aliases()
+    # 抓取到的每个演员都给出候选名：中文名优先，含别名组里的其他写法
+    result["actress_options"] = [
+        {"original": name, "candidates": scraper.actress_candidates(name, aliases)}
+        for name in result.get("actress", [])
+    ]
     return jsonify({"ok": True, "data": result})
+
+
+@app.route("/api/actress-candidates")
+@login_required
+def api_actress_candidates():
+    """编辑影片时按当前演员名取候选，方便把旧数据手动改成中文名。"""
+    name = request.args.get("name", "").strip()
+    return jsonify({
+        "ok": True,
+        "name": name,
+        "candidates": scraper.actress_candidates(name, db.load_aliases()) if name else [],
+    })
 
 
 @app.route("/api/movies", methods=["POST"])
@@ -126,6 +144,15 @@ def api_movie(movie_id):
         return jsonify({"ok": True, "movie": movie})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/movie/<int:movie_id>")
+@login_required
+def movie_detail(movie_id):
+    movie = db.get_movie(movie_id)
+    if not movie:
+        return redirect(url_for("index"))
+    return render_template("detail.html", movie=movie)
 
 
 @app.route("/covers/<path:filename>")
