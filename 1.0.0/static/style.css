@@ -82,10 +82,20 @@ button { cursor: pointer; }
 .select-hint { color: var(--muted); font-size: 12px; }
 .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 
-/* ---------- 卡片网格 ---------- */
-.grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr));
-  gap: 16px; padding: 0 22px 40px;
+/* ---------- 卡片网格（按日期分组） ---------- */
+.grid { padding: 0 22px 40px; }
+.date-group { margin-bottom: 22px; }
+.date-group-head {
+  display: flex; align-items: center; gap: 10px; margin: 0 0 10px;
+  padding-bottom: 8px; border-bottom: 1px solid var(--border);
+}
+.date-group-head h2 { margin: 0; font-size: 15px; font-weight: 600; }
+.date-group-head span {
+  background: #eef3ff; color: var(--primary); border-radius: 20px;
+  padding: 1px 8px; font-size: 11px; font-weight: 500;
+}
+.date-group-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 16px;
 }
 .movie-card {
   background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
