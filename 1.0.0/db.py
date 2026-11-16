@@ -29,6 +29,7 @@ def init_db():
             is_remux      INTEGER NOT NULL DEFAULT 0,
             framerate     TEXT NOT NULL DEFAULT '',
             cover_path    TEXT NOT NULL DEFAULT '',
+            cover_url     TEXT NOT NULL DEFAULT '',
             download_url  TEXT NOT NULL DEFAULT '',
             source        TEXT NOT NULL DEFAULT '',
             note          TEXT NOT NULL DEFAULT '',
@@ -37,6 +38,10 @@ def init_db():
         )
         """
     )
+    # 向后兼容：旧库没有 cover_url 列时补上
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(movies)").fetchall()}
+    if "cover_url" not in cols:
+        conn.execute("ALTER TABLE movies ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
     conn.commit()
     conn.close()
 
@@ -129,6 +134,7 @@ def _normalize(data):
         "is_remux": 1 if str(data.get("is_remux", "0")) in ("1", "true", "on", "True") else 0,
         "framerate": str(data.get("framerate", "")).strip(),
         "cover_path": str(data.get("cover_path", "")).strip(),
+        "cover_url": str(data.get("cover_url", "")).strip(),
         "download_url": str(data.get("download_url", "")).strip(),
         "source": str(data.get("source", "")).strip(),
         "note": str(data.get("note", "")).strip(),
@@ -145,9 +151,9 @@ def create_movie(data):
         conn.execute(
             """INSERT INTO movies
                (code,title,actress,release_date,added_at,resolution,is_original,is_remux,
-                framerate,cover_path,download_url,source,note,created_at,updated_at)
+                framerate,cover_path,cover_url,download_url,source,note,created_at,updated_at)
                VALUES (:code,:title,:actress,:release_date,:added_at,:resolution,:is_original,:is_remux,
-                :framerate,:cover_path,:download_url,:source,:note,:now,:now)""",
+                :framerate,:cover_path,:cover_url,:download_url,:source,:note,:now,:now)""",
             d,
         )
         conn.commit()
@@ -166,7 +172,8 @@ def update_movie(movie_id, data):
         """UPDATE movies SET
              code=:code,title=:title,actress=:actress,release_date=:release_date,added_at=:added_at,
              resolution=:resolution,is_original=:is_original,is_remux=:is_remux,framerate=:framerate,
-             cover_path=:cover_path,download_url=:download_url,source=:source,note=:note,updated_at=:now
+             cover_path=:cover_path,cover_url=:cover_url,download_url=:download_url,source=:source,
+             note=:note,updated_at=:now
            WHERE id=:id""",
         {**d, "id": movie_id},
     )
