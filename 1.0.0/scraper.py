@@ -43,14 +43,17 @@ ACTRESS_SELECTORS = [
 # 发行日期：JavBus 常见 "发行日期：" 后跟 <a>；JavDB 常见 "日期："
 DATE_LABELS = ["发行日期", "発売日", "日期", "上映日期", "release date", "配信開始日"]
 DATE_SELECTORS = ['.info a[href*="/date/"]', '.info span.genre + a', '.video-info .value']
-# 封面
+# 封面（顺序即优先级，按站点改版时维护这里）
 COVER_SELECTORS = [
-    'a.bigImage img',
-    '.video-cover img',
+    'a.bigImage img',                       # JavBus 大图链接
+    '.video-cover img',                     # JavDB 详情封面
     '#cover img',
     '.cover img',
-    'img[src*="/pics/"]',
-    'meta[property="og:image"]',
+    '.cover-wrap img',
+    'img[src*="/pics/"]',                   # JavBus 图片 CDN
+    'img[src*="cover"]',
+    'meta[property="og:image"]',            # 兜底：社交分享图，通常是高清封面
+    'meta[name="twitter:image"]',
 ]
 
 DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
@@ -140,18 +143,43 @@ def _extract_title(soup, code):
     return ""
 
 
+def _abs_url(url, base):
+    """把相对/协议相对 URL 转成绝对 URL。"""
+    if not url:
+        return ""
+    url = url.strip()
+    if url.startswith("//"):
+        url = "https:" + url
+    elif url.startswith("/"):
+        url = base + url
+    return url if url.startswith("http") else ""
+
+
 def _extract_cover_url(soup, base):
-    for sel in COVER_SELECTORS:
-        node = soup.select_one(sel)
-        if not node:
-            continue
-        url = node.get("src") or node.get("href") or node.get("content") or node.get("data-src")
-        if url and url.startswith("//"):
-            url = "https:" + url
-        if url and url.startswith("/"):
-            url = base + url
-        if url and url.startswith("http"):
+    # og:image 单独优先取（很多站点的分享图就是最清晰封面，且不受懒加载影响）
+    og = soup.select_one('meta[property="og:image"], meta[name="twitter:image"]')
+    if og:
+        url = _abs_url(og.get("content", ""), base)
+        if url:
             return url
+
+    for sel in COVER_SELECTORS:
+        for node in soup.select(sel):
+            # 依次尝试常见属性，含各种懒加载写法
+            candidates = []
+            for attr in ("src", "data-src", "data-original", "data-echo", "href", "content"):
+                v = node.get(attr)
+                if v:
+                    candidates.append(v)
+            # srcset 形如 "a.jpg 1x, b.jpg 2x"，取最后一个（通常最大）
+            srcset = node.get("srcset") or node.get("data-srcset")
+            if srcset:
+                parts = [p.strip().split()[0] for p in srcset.split(",") if p.strip()]
+                candidates.extend(reversed(parts))
+            for raw in candidates:
+                url = _abs_url(raw, base)
+                if url:
+                    return url
     return ""
 
 
@@ -220,26 +248,53 @@ def _merge(results):
 
 
 def download_cover(url, code):
-    """下载封面到本地，返回相对文件名；失败返回空串。"""
+    """下载封面到本地，返回 (文件名, 错误信息)。
+
+    站点图片普遍有防盗链，必须带对应来源站的 Referer 才能下载，
+    因此按 URL 域名推断 Referer，两个站都试一遍以确保成功。
+    """
     if not url:
-        return ""
-    try:
-        r = requests.get(
-            url, headers=HEADERS, timeout=REQUEST_TIMEOUT,
-            proxies=_proxies(), stream=True,
-        )
-        r.raise_for_status()
-        ctype = r.headers.get("Content-Type", "")
-        ext = ".webp" if "webp" in ctype else ".png" if "png" in ctype else ".jpg"
-        filename = re.sub(r"[^A-Za-z0-9_-]", "_", code) + ext
-        path = os.path.join(COVER_DIR, filename)
-        with open(path, "wb") as f:
-            for chunk in r.iter_content(8192):
-                if chunk:
-                    f.write(chunk)
-        return filename
-    except Exception:  # noqa: BLE001
-        return ""
+        return "", "未抓到封面地址"
+
+    # 按图片 URL 域名推断可能的 Referer（防盗链来源）
+    referers = []
+    if "javdb" in url:
+        referers.append(JAVDB_BASE + "/")
+    if "javbus" in url or "pics.dmm" in url or "dmm.co" in url:
+        referers.append(JAVBUS_BASE + "/")
+    # 兜底：两个站都试
+    for ref in (JAVBUS_BASE + "/", JAVDB_BASE + "/"):
+        if ref not in referers:
+            referers.append(ref)
+
+    last_err = "未知错误"
+    for referer in referers:
+        headers = dict(HEADERS)
+        headers["Referer"] = referer
+        try:
+            r = requests.get(
+                url, headers=headers, timeout=REQUEST_TIMEOUT,
+                proxies=_proxies(), stream=True,
+            )
+            r.raise_for_status()
+            ctype = r.headers.get("Content-Type", "")
+            # 有些站点对失败请求返回 HTML，按 Content-Type 排除
+            if "text/html" in ctype:
+                last_err = "返回的是 HTML（防盗链拦截）"
+                continue
+            ext = ".webp" if "webp" in ctype else ".png" if "png" in ctype else ".jpg"
+            filename = re.sub(r"[^A-Za-z0-9_-]", "_", code) + ext
+            path = os.path.join(COVER_DIR, filename)
+            with open(path, "wb") as f:
+                for chunk in r.iter_content(8192):
+                    if chunk:
+                        f.write(chunk)
+            if os.path.getsize(path) > 1024:  # 至少 1KB，过滤错误占位图
+                return filename, ""
+            last_err = "下载文件过小"
+        except Exception as exc:  # noqa: BLE001
+            last_err = str(exc)
+    return "", last_err
 
 
 def scrape(code):
@@ -261,7 +316,9 @@ def scrape(code):
         results = [f1.result(), f2.result()]
 
     merged = _merge(results)
-    cover_path = download_cover(merged["cover_url"], code) if merged["cover_url"] else ""
+    cover_path, cover_err = download_cover(merged["cover_url"], code)
+    if cover_err:
+        merged["errors"].append(f"封面: {cover_err}")
     return {
         "code": code,
         "title": merged["title"],
