@@ -161,5 +161,16 @@ def cover(filename):
     return send_from_directory(config.COVER_DIR, filename)
 
 
+@app.route("/thumbs/<path:filename>")
+@login_required
+def thumb(filename):
+    """卡片用缩略图；旧数据没有缩略图时回退到原图，不影响显示。"""
+    name = os.path.splitext(filename)[0] + ".jpg"
+    thumb_dir = os.path.join(config.COVER_DIR, "thumbs")
+    if os.path.isfile(os.path.join(thumb_dir, name)):
+        return send_from_directory(thumb_dir, name)
+    return send_from_directory(config.COVER_DIR, filename)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=config.PORT, debug=False)

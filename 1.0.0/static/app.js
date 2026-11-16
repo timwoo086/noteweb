@@ -83,7 +83,7 @@ function renderMovies(movies) {
 
     // 封面：优先本地下载图，其次用抓取到的外链（no-referrer 规避防盗链）
     const cover = m.cover_path
-      ? `<img src="/covers/${encodeURIComponent(m.cover_path)}" alt="封面" loading="lazy">`
+      ? `<img src="/thumbs/${encodeURIComponent(m.cover_path)}" alt="封面" loading="lazy">`
       : m.cover_url
         ? `<img src="${escapeHtml(m.cover_url)}" alt="封面" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-placeholder',textContent:'暂无封面'}))">`
         : `<div class="cover-placeholder">暂无封面</div>`;
@@ -102,9 +102,9 @@ function renderMovies(movies) {
       <a class="cover-wrap detail-link" href="/movie/${m.id}" title="查看详情">
         ${cover}
         <span class="code-badge">${escapeHtml(m.code)}</span>
-        ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
       </a>
       <div class="card-body">
+        ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
         <a class="card-title detail-link" href="/movie/${m.id}" title="查看详情">${escapeHtml(m.title) || '&nbsp;'}</a>
         <div class="card-actress">${actressLinks || '&nbsp;'}</div>
         <div class="card-dates">

@@ -333,6 +333,22 @@ def _merge(results):
     return merged
 
 
+def _make_thumb(filename, max_size=(360, 240)):
+    """为卡片列表生成小图；详情页仍用原图。Pillow 缺失或损坏图片时静默跳过。"""
+    try:
+        from PIL import Image
+        src = os.path.join(COVER_DIR, filename)
+        thumb_dir = os.path.join(COVER_DIR, "thumbs")
+        os.makedirs(thumb_dir, exist_ok=True)
+        thumb_name = os.path.splitext(filename)[0] + ".jpg"
+        with Image.open(src) as img:
+            img = img.convert("RGB")
+            img.thumbnail(max_size, Image.LANCZOS)
+            img.save(os.path.join(thumb_dir, thumb_name), "JPEG", quality=75, optimize=True)
+    except Exception:
+        pass
+
+
 def download_cover(url, code):
     """下载封面到本地，返回 (文件名, 错误信息)。
 
@@ -376,6 +392,7 @@ def download_cover(url, code):
                     if chunk:
                         f.write(chunk)
             if os.path.getsize(path) > 1024:  # 至少 1KB，过滤错误占位图
+                _make_thumb(filename)
                 return filename, ""
             last_err = "下载文件过小"
         except Exception as exc:  # noqa: BLE001
