@@ -38,12 +38,20 @@ async function loadActresses() {
   const res = await api('/api/actresses');
   if (!res || !res.ok) return;
   const sel = $('actressFilter');
+  const selected = sel.value || sel.dataset.selected || '';
+  // 保留“全部”以及点击卡片演员名时动态加入的选项，其余重建，避免重复
+  const extra = [...sel.options].filter(o => o.value && !o.dataset.fromApi);
+  sel.innerHTML = '<option value="">全部</option>';
   res.actresses.forEach(name => {
     const opt = document.createElement('option');
-    opt.value = name; opt.textContent = name;
+    opt.value = name; opt.textContent = name; opt.dataset.fromApi = '1';
     sel.appendChild(opt);
   });
-  if (sel.dataset.selected) sel.value = sel.dataset.selected;
+  extra.forEach(opt => {
+    if (![...sel.options].some(o => o.value === opt.value)) sel.appendChild(opt);
+  });
+  sel.value = selected || sel.dataset.selected || '';
+  if (!sel.value) sel.dataset.selected = '';
 }
 
 function queryString() {
@@ -85,7 +93,10 @@ function renderMovies(movies) {
     if (m.is_remux) tags.push(`<span class="tag tag-remux">REMUX</span>`);
     if (m.framerate) tags.push(`<span class="tag tag-fps">${escapeHtml(m.framerate)}</span>`);
 
-    const actresses = (m.actress || []).join('、');
+    // 演员名可点击筛选
+    const actressLinks = (m.actress || []).map(a =>
+      `<span class="actress-link" data-actress="${escapeHtml(a)}" title="点击筛选该演员">${escapeHtml(a)}</span>`
+    ).join('、');
     card.innerHTML = `
       <div class="cover-wrap">
         ${cover}
@@ -94,7 +105,7 @@ function renderMovies(movies) {
       </div>
       <div class="card-body">
         <div class="card-title">${escapeHtml(m.title) || '&nbsp;'}</div>
-        <div class="card-actress">${escapeHtml(actresses) || '&nbsp;'}</div>
+        <div class="card-actress">${actressLinks || '&nbsp;'}</div>
         <div class="card-dates">
           <span>发行 <b>${escapeHtml(m.release_date) || '-'}</b></span>
           <span>录入 <b>${escapeHtml(m.added_at) || '-'}</b></span>
@@ -102,7 +113,10 @@ function renderMovies(movies) {
         <div class="card-foot">
           <button class="copy-btn" data-copy="${m.id}" data-url="${escapeHtml(m.download_url)}">复制</button>
           <button class="edit-btn" data-edit="${m.id}" title="编辑">✎</button>
-          <button class="del-btn" data-del="${m.id}" title="删除">×</button>
+          <label class="select-btn" title="勾选以多选">
+            <input type="checkbox" class="movie-check" data-id="${m.id}" data-url="${escapeHtml(m.download_url)}">
+            <span>多选</span>
+          </label>
         </div>
       </div>`;
     grid.appendChild(card);
@@ -114,9 +128,23 @@ function renderMovies(movies) {
   grid.querySelectorAll('[data-edit]').forEach(btn => {
     btn.addEventListener('click', () => openModal(Number(btn.dataset.edit)));
   });
-  grid.querySelectorAll('[data-del]').forEach(btn => {
-    btn.addEventListener('click', () => removeMovie(Number(btn.dataset.del)));
+  // 点击演员名 → 按该演员（含别名组）筛选
+  grid.querySelectorAll('.actress-link').forEach(el => {
+    el.addEventListener('click', () => {
+      const name = el.dataset.actress;
+      const sel = $('actressFilter');
+      // 下拉里没有该名字（如别名）时补一个选项，保证能选中
+      if (![...sel.options].some(o => o.value === name)) {
+        const opt = document.createElement('option');
+        opt.value = name; opt.textContent = name;
+        sel.appendChild(opt);
+      }
+      sel.value = name;
+      loadMovies();
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    });
   });
+  updateSelectUI();
 }
 
 async function loadMovies() {
@@ -125,21 +153,60 @@ async function loadMovies() {
   renderMovies(res.movies);
 }
 
+// 通用剪贴板写入（带降级方案）
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); ta.remove();
+  }
+}
+
 // 复制与下载合并为一个按钮：有下载地址则复制，否则提示先补录
 async function copyLink(btn) {
   const url = btn.dataset.url || '';
   if (!url) { toast('该影片还没有下载地址，请先编辑补录'); return; }
-  try {
-    await navigator.clipboard.writeText(url);
-  } catch (e) {
-    const ta = document.createElement('textarea');
-    ta.value = url; document.body.appendChild(ta); ta.select();
-    document.execCommand('copy'); ta.remove();
-  }
+  await writeClipboard(url);
   btn.classList.add('copied');
   btn.textContent = '已复制';
   toast('下载地址已复制');
   setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '复制'; }, 1500);
+}
+
+// ---------- 多选 / 全选 / 一键复制 ----------
+function selectedMovies() {
+  return [...document.querySelectorAll('.movie-check:checked')];
+}
+
+function updateSelectUI() {
+  const checked = selectedMovies();
+  const all = document.querySelectorAll('.movie-check');
+  $('selectCount').textContent = `已选 ${checked.length} 部`;
+  $('batchCopyBtn').disabled = checked.length === 0;
+  // 全选复选框状态：全选 / 部分选 / 未选
+  const selAll = $('selectAll');
+  selAll.checked = all.length > 0 && checked.length === all.length;
+  selAll.indeterminate = checked.length > 0 && checked.length < all.length;
+}
+
+function bindSelectAll() {
+  $('selectAll').addEventListener('change', e => {
+    document.querySelectorAll('.movie-check').forEach(c => { c.checked = e.target.checked; });
+    updateSelectUI();
+  });
+  document.getElementById('movieGrid').addEventListener('change', e => {
+    if (e.target.classList.contains('movie-check')) updateSelectUI();
+  });
+  $('batchCopyBtn').addEventListener('click', async () => {
+    const urls = selectedMovies()
+      .map(c => c.dataset.url)
+      .filter(u => u && u.trim());
+    if (!urls.length) { toast('选中的影片都没有下载地址'); return; }
+    await writeClipboard(urls.join('\n'));
+    toast(`已复制 ${urls.length} 个下载地址`);
+  });
 }
 
 // ---------- 弹窗 ----------
@@ -153,6 +220,7 @@ function openModal(id = null) {
   ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fResolution','fFramerate','fDownload','fNote'].forEach(i => $(i).value = '');
   $('fOriginal').checked = false;
   $('fRemux').checked = false;
+  $('deleteBtn').hidden = !id;
 
   if (id) {
     api('/api/movies/' + id).then(res => {
@@ -272,6 +340,123 @@ async function removeMovie(id) {
   if (res && res.ok) { toast('已删除'); loadMovies(); }
 }
 
+// ---------- 演员别名设置 ----------
+let aliasGroups = [];
+
+function aliasInput(value, placeholder, onRemove) {
+  const row = document.createElement('div');
+  row.className = 'alias-input-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = value || '';
+  input.placeholder = placeholder;
+  row.appendChild(input);
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'alias-remove';
+  del.title = '移除';
+  del.textContent = '×';
+  del.addEventListener('click', onRemove);
+  row.appendChild(del);
+  return row;
+}
+
+// 把页面上正在编辑的内容回写到内存，避免增删行时丢失未保存的输入
+function syncAliasGroups() {
+  aliasGroups = [...$('aliasList').querySelectorAll('.alias-group')].map(group => {
+    const values = [...group.querySelectorAll('.alias-input-row input')].map(i => i.value.trim());
+    return { name: values[0] || '', aliases: values.slice(1) };
+  });
+}
+
+function renderAliasGroups() {
+  const box = $('aliasList');
+  box.innerHTML = '';
+  aliasGroups.forEach((g, gi) => {
+    const group = document.createElement('div');
+    group.className = 'alias-group';
+
+    const head = document.createElement('div');
+    head.className = 'alias-group-head';
+    head.innerHTML = `<span class="alias-group-label">第 ${gi + 1} 组</span>`;
+    const delGroup = document.createElement('button');
+    delGroup.type = 'button';
+    delGroup.className = 'alias-group-del';
+    delGroup.textContent = '删除此组';
+    delGroup.addEventListener('click', () => {
+      syncAliasGroups();
+      aliasGroups.splice(gi, 1);
+      renderAliasGroups();
+    });
+    head.appendChild(delGroup);
+    group.appendChild(head);
+
+    // 第一行即统一显示名
+    group.appendChild(aliasInput(g.name || '', '统一显示名（第一行为准）', () => {
+      syncAliasGroups();
+      aliasGroups[gi].name = '';
+      renderAliasGroups();
+    }));
+    (g.aliases || []).forEach((a, ai) => {
+      group.appendChild(aliasInput(a, '别名', () => {
+        syncAliasGroups();
+        aliasGroups[gi].aliases.splice(ai, 1);
+        renderAliasGroups();
+      }));
+    });
+
+    const addAlias = document.createElement('button');
+    addAlias.type = 'button';
+    addAlias.className = 'alias-add';
+    addAlias.textContent = '+ 添加别名';
+    addAlias.addEventListener('click', () => {
+      syncAliasGroups();
+      aliasGroups[gi].aliases.push('');
+      renderAliasGroups();
+      const inputs = $('aliasList').querySelectorAll('.alias-group')[gi].querySelectorAll('.alias-input-row input');
+      inputs[inputs.length - 1].focus();
+    });
+    group.appendChild(addAlias);
+    box.appendChild(group);
+  });
+  if (!aliasGroups.length) {
+    box.innerHTML = '<div class="alias-empty">还没有分组，点下面的按钮添加。</div>';
+  }
+}
+
+function collectAliasGroups() {
+  syncAliasGroups();
+  return aliasGroups
+    .map(g => ({ name: (g.name || '').trim(), aliases: (g.aliases || []).map(a => (a || '').trim()).filter(Boolean) }))
+    .filter(g => g.name);
+}
+
+async function openAliasModal() {
+  const res = await api('/api/aliases');
+  if (!res || !res.ok) return;
+  aliasGroups = (res.aliases || []).map(g => ({
+    name: g.name || '',
+    aliases: [...(g.aliases || [])]
+  }));
+  renderAliasGroups();
+  $('aliasModal').hidden = false;
+}
+
+function closeAliasModal() { $('aliasModal').hidden = true; }
+
+async function saveAliases() {
+  const groups = collectAliasGroups();
+  const res = await api('/api/aliases', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({aliases: groups})
+  });
+  if (!res || !res.ok) { toast('保存别名失败'); return; }
+  toast('演员别名已保存');
+  closeAliasModal();
+  await loadActresses();
+  await loadMovies();
+}
+
 // ---------- 事件绑定 ----------
 function bind() {
   $('searchBtn').addEventListener('click', loadMovies);
@@ -284,8 +469,27 @@ function bind() {
   $('addBtn').addEventListener('click', () => openModal());
   $('fetchBtn').addEventListener('click', doFetch);
   $('saveBtn').addEventListener('click', saveMovie);
+  $('deleteBtn').addEventListener('click', () => {
+    if (editingId) removeMovie(editingId);
+  });
   document.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeModal));
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+  // 演员别名弹窗
+  $('aliasManageBtn').addEventListener('click', openAliasModal);
+  $('addAliasGroupBtn').addEventListener('click', () => {
+    syncAliasGroups();
+    aliasGroups.push({ name: '', aliases: [] });
+    renderAliasGroups();
+    const inputs = $('aliasList').querySelectorAll('.alias-group:last-child .alias-input-row input');
+    if (inputs.length) inputs[0].focus();
+  });
+  $('saveAliasBtn').addEventListener('click', saveAliases);
+  document.querySelectorAll('[data-alias-close]').forEach(el => el.addEventListener('click', closeAliasModal));
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Escape') return;
+    if (!$('aliasModal').hidden) closeAliasModal();
+    else closeModal();
+  });
+  bindSelectAll();
 }
 
 async function init() {

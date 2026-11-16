@@ -78,6 +78,18 @@ def api_actresses():
     return jsonify({"ok": True, "actresses": db.all_actresses()})
 
 
+@app.route("/api/aliases", methods=["GET", "POST"])
+@login_required
+def api_aliases():
+    """演员别名分组：同一人多个名字合并，点击任一名字筛出全部影片。"""
+    if request.method == "POST":
+        data = request.get_json(silent=True) or {}
+        groups = data.get("aliases", [])
+        db.save_aliases(groups)
+        return jsonify({"ok": True, "aliases": groups})
+    return jsonify({"ok": True, "aliases": db.load_aliases()})
+
+
 @app.route("/api/scrape", methods=["POST"])
 @login_required
 def api_scrape():

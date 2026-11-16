@@ -35,6 +35,10 @@
     <label>演员</label>
     <select id="actressFilter" data-selected="{{ actress }}"><option value="">全部</option></select>
   </div>
+  <div class="field">
+    <label>&nbsp;</label>
+    <button class="btn-ghost" id="aliasManageBtn" title="把同一演员的多个名字合并">演员别名</button>
+  </div>
   <div class="field grow">
     <label>编号 / 标题</label>
     <input type="text" id="keyword" value="{{ keyword }}" placeholder="搜索编号或标题">
@@ -43,6 +47,13 @@
     <button class="btn-primary" id="searchBtn">查询</button>
     <button class="btn-ghost" id="resetBtn">重置</button>
   </div>
+</section>
+
+<section class="selectbar">
+  <label class="select-all"><input type="checkbox" id="selectAll"> 全选</label>
+  <span class="select-count" id="selectCount">已选 0 部</span>
+  <button class="btn-primary" id="batchCopyBtn" disabled>一键复制下载地址</button>
+  <span class="select-hint">勾选影片后可批量复制（每行一个地址）</span>
 </section>
 
 <main class="grid" id="movieGrid"></main>
@@ -90,8 +101,29 @@
       </div>
     </div>
     <div class="modal-foot">
+      <button class="btn-danger" id="deleteBtn" hidden>删除此影片</button>
       <button class="btn-ghost" data-close>取消</button>
       <button class="btn-primary" id="saveBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 演员别名设置弹窗 -->
+<div class="modal" id="aliasModal" hidden>
+  <div class="modal-backdrop" data-alias-close></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>演员别名设置</h2>
+      <button class="icon-btn" data-alias-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="alias-tip">同一演员常有多个名字（如 RION / りおん / 梨音）。把它们的名字归为一组，点击任一名字即可筛出该演员的全部影片。第一行为统一显示名。</p>
+      <div id="aliasList" class="alias-list"></div>
+      <button class="btn-ghost" id="addAliasGroupBtn">+ 添加一组</button>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" data-alias-close>取消</button>
+      <button class="btn-primary" id="saveAliasBtn">保存设置</button>
     </div>
   </div>
 </div>

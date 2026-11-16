@@ -6,6 +6,52 @@ from datetime import datetime
 
 from config import DB_PATH, COVER_DIR
 
+# 演员别名配置：JSON 文件，结构为 [{"name": 规范名, "aliases": [别名1, 别名2]}, ...]
+# 同一组内的名字视为同一个演员，点击任一名字都会筛出整组影片。
+ALIASES_PATH = os.path.join(os.path.dirname(DB_PATH), "aliases.json")
+
+
+def _aliases_path():
+    return ALIASES_PATH
+
+
+def load_aliases():
+    """读取别名分组配置，返回列表。"""
+    try:
+        with open(ALIASES_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list):
+            return data
+    except (OSError, ValueError):
+        pass
+    return []
+
+
+def save_aliases(groups):
+    """保存别名分组配置。"""
+    os.makedirs(os.path.dirname(ALIASES_PATH), exist_ok=True)
+    with open(ALIASES_PATH, "w", encoding="utf-8") as f:
+        json.dump(groups, f, ensure_ascii=False, indent=2)
+    return groups
+
+
+def _canonical(name):
+    """返回某名字所属组的规范名（不在任何组则返回自身）。"""
+    for g in load_aliases():
+        members = [g.get("name", "")] + list(g.get("aliases", []))
+        if name in members:
+            return g.get("name", name)
+    return name
+
+
+def _group_members(name):
+    """返回某名字所属组的全部名字（含自身），用于筛选。"""
+    for g in load_aliases():
+        members = [g.get("name", "")] + list(g.get("aliases", []))
+        if name in members:
+            return [m for m in members if m]
+    return [name]
+
 
 def connect():
     conn = sqlite3.connect(DB_PATH)
@@ -84,9 +130,11 @@ def list_movies(date_field="added_at", date_from="", date_to="", actress="", key
         clauses.append(f"{date_field} <= ?")
         args.append(date_to)
     if actress:
-        # actress 存 JSON 数组文本，用 LIKE 做模糊包含匹配
-        clauses.append("actress LIKE ?")
-        args.append(f"%{actress}%")
+        # 展开别名组：同组内任一名字命中即算该演员（如 RION / りおん）
+        members = _group_members(actress)
+        sub = " OR ".join("actress LIKE ?" for _ in members)
+        clauses.append(f"({sub})")
+        args.extend(f"%{m}%" for m in members)
     if keyword:
         clauses.append("(code LIKE ? OR title LIKE ?)")
         args.extend([f"%{keyword}%", f"%{keyword}%"])
@@ -102,6 +150,7 @@ def list_movies(date_field="added_at", date_from="", date_to="", actress="", key
 
 
 def all_actresses():
+    """演员列表：同一别名组合并为规范名，避免下拉里重复。"""
     conn = connect()
     rows = conn.execute("SELECT actress FROM movies").fetchall()
     conn.close()
@@ -110,7 +159,7 @@ def all_actresses():
         try:
             for n in json.loads(r["actress"] or "[]"):
                 if n:
-                    names.add(n)
+                    names.add(_canonical(n))
         except (ValueError, TypeError):
             continue
     return sorted(names)

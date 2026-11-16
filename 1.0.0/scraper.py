@@ -29,6 +29,53 @@ HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7",
 }
 
+# 演员名中文映射表：日文/繁体写法 -> 大陆通用简体中文名。
+# 抓取到的演员名会逐个查表转换成中文。可根据需要继续补充。
+# （左侧也可写繁体/日文假名写法，命中即替换为右侧中文名）
+ACTRESS_CN_MAP = {
+    "波多野結衣": "波多野结衣", "波多野衣結": "波多野结衣",
+    "三上悠亜": "三上悠亚", "三上悠亚": "三上悠亚",
+    "新ありな": "新有菜", "橋本有菜": "桥本有菜", "橋本ありな": "桥本有菜",
+    "明日花キララ": "明日花绮罗", "明日花綺羅": "明日花绮罗",
+    "河北彩花": "河北彩花", "河北彩伽": "河北彩花",
+    "弥生みづき": "弥生美月", "彌生美月": "弥生美月", "弥生美月": "弥生美月",
+    "逢坂真帆": "逢坂真帆", "星野ナミ": "星野奈美", "星野なみ": "星野奈美",
+    "神咲詩織": "神咲诗织", "神咲しおり": "神咲诗织",
+    "椎名そら": "椎名空", "椎名そら": "椎名空",
+    "白石茉莉奈": "白石茉莉奈", "白石まわり": "白石茉莉奈",
+    "沖田杏梨": "冲田杏梨", "冲田杏梨": "冲田杏梨",
+    "有成璃": "有成璃", "佐藤えり": "佐藤绘里",
+    "桐谷直葉": "桐谷直叶", "桐谷なお": "桐谷直叶",
+    "藍沢夏癒": "蓝泽夏愈", "篠崎愛": "筱崎爱",
+    "安室奈美恵": "安室奈美惠",
+    "吉沢明歩": "吉泽明步", "吉川蓮": "吉川莲",
+    "森下交": "森下交", "愛田奈々": "爱田奈奈",
+    "相沢みなみ": "相泽南", "相泽みなみ": "相泽南",
+    "岬ななみ": "岬奈奈美", "岬ななみ": "岬奈奈美",
+    "戸田真琴": "户田真琴", "户田真琴": "户田真琴",
+    "涼森れむ": "凉森梦", "涼森れむ": "凉森梦",
+    "関根和美": "关根和美", "關根和美": "关根和美",
+}
+
+
+def to_chinese(name):
+    """把演员名转成简体中文：先查映射表，再把常见日文/繁体字替换成简体。"""
+    if not name:
+        return name
+    name = name.strip()
+    if name in ACTRESS_CN_MAP:
+        return ACTRESS_CN_MAP[name]
+    # 繁体 -> 简体兜底转换（覆盖常见女优名用字）
+    simple_map = {
+        "結": "结", "亞": "亚", "亜": "亚", "橋": "桥",
+        "綺": "绮", "羅": "罗", "彌": "弥", "沢": "泽", "澤": "泽", "沖": "冲",
+        "愛": "爱", "恵": "惠", "詩": "诗", "織": "织", "戸": "户", "関": "关",
+        "涼": "凉", "飯": "饭", "岡": "冈", "姫": "姬", "麗": "丽", "華": "华",
+        "優": "优", "緒": "绪", "穂": "穗", "鈴": "铃",
+    }
+    converted = "".join(simple_map.get(ch, ch) for ch in name)
+    return converted
+
 # ---------- 选择器表（改版时主要维护这里）----------
 # 标题
 TITLE_SELECTORS = ["h3", "div.info h3", ".container h3", "h1", ".video-info h2", "strong.title"]
@@ -123,7 +170,11 @@ def _extract_actress(soup):
     for sel in ACTRESS_SELECTORS:
         for a in soup.select(sel):
             name = _text(a)
-            if name and name not in names and len(name) < 40:
+            if not name or len(name) >= 40:
+                continue
+            # 转成简体中文名（查映射表 + 繁简替换）
+            name = to_chinese(name)
+            if name and name not in names:
                 names.append(name)
         if names:
             break
@@ -200,8 +251,11 @@ def fetch_javbus(code):
 
 
 def fetch_javdb(code):
-    """JavDB 详情地址是站内 ID，先搜索定位第一命中项。"""
-    search_url = f"{JAVDB_BASE}/search?q={code}&f=all"
+    """JavDB 详情地址是站内 ID，先搜索定位第一命中项。
+
+    带 locale=zh-CN 请求中文版，演员名/标题优先返回中文（avdb 项目的做法）。
+    """
+    search_url = f"{JAVDB_BASE}/search?q={code}&f=all&locale=zh-CN"
     r = _get(search_url)
     soup = BeautifulSoup(r.text, "lxml")
     # 优先匹配列表里编号完全一致项，否则取第一个结果
@@ -222,6 +276,8 @@ def fetch_javdb(code):
         return _parse_detail(r.text, code, JAVDB_BASE)
     if target.startswith("/"):
         target = JAVDB_BASE + target
+    # 详情页也请求中文版（保留已有 query 参数）
+    target = target + ("&" if "?" in target else "?") + "locale=zh-CN"
     detail = _get(target)
     return _parse_detail(detail.text, code, JAVDB_BASE)
 

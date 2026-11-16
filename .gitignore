@@ -5,6 +5,7 @@ __pycache__/
 venv/
 # 运行时数据不入库
 1.0.0/data/movies.db
+1.0.0/data/aliases.json
 1.0.0/data/covers/*
 !1.0.0/data/covers/.gitkeep
 *.log

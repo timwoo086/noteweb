@@ -45,6 +45,11 @@ button { cursor: pointer; }
   border-radius: 7px; padding: 8px 16px; text-decoration: none; transition: border-color .15s;
 }
 .btn-ghost:hover { border-color: #c9ced6; }
+.btn-danger {
+  background: #fff; color: var(--red); border: 1px solid #f3bcbc;
+  border-radius: 7px; padding: 8px 16px;
+}
+.btn-danger:hover { background: #fff3f3; }
 
 /* ---------- 搜索栏 ---------- */
 .searchbar {
@@ -64,6 +69,18 @@ button { cursor: pointer; }
 .seg { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; height: 36px; }
 .seg-item { border: none; background: #fff; padding: 0 14px; color: var(--muted); }
 .seg-item.active { background: var(--primary); color: #fff; }
+
+/* ---------- 多选工具栏 ---------- */
+.selectbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  margin: 0 22px 14px; padding: 10px 16px; background: var(--card);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.select-all { display: flex; align-items: center; gap: 6px; font-weight: 500; cursor: pointer; }
+.select-all input, .select-btn input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primary); }
+.select-count { color: var(--primary); font-weight: 500; }
+.select-hint { color: var(--muted); font-size: 12px; }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
 
 /* ---------- 卡片网格 ---------- */
 .grid {
@@ -99,6 +116,10 @@ button { cursor: pointer; }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
 .card-actress { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.actress-link {
+  color: #4a6fa8; cursor: pointer; border-bottom: 1px dashed #9db4d8;
+}
+.actress-link:hover { color: var(--primary); border-bottom-style: solid; }
 .card-dates { display: flex; gap: 14px; font-size: 11px; color: var(--muted); }
 .card-dates b { color: #59616b; font-weight: 500; }
 .card-foot { display: flex; gap: 8px; margin-top: auto; padding-top: 4px; }
@@ -110,8 +131,12 @@ button { cursor: pointer; }
 .copy-btn.copied { background: var(--green); color: #fff; border-color: var(--green); }
 .edit-btn { width: 34px; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--muted); }
 .edit-btn:hover { color: var(--primary); border-color: #bcd0f7; }
-.del-btn { width: 34px; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--muted); }
-.del-btn:hover { color: var(--red); border-color: #f3bcbc; }
+.select-btn {
+  display: flex; align-items: center; gap: 5px; height: 32px; padding: 0 9px;
+  border: 1px solid var(--border); border-radius: 6px; background: #fff;
+  color: var(--muted); font-size: 12px; cursor: pointer; user-select: none;
+}
+.select-btn:has(input:checked) { background: #eef3ff; border-color: #bcd0f7; color: var(--primary); }
 .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
 
 /* ---------- 弹窗 ---------- */
@@ -147,6 +172,34 @@ button { cursor: pointer; }
 .form-item input:focus, .form-item select:focus { border-color: var(--primary); }
 .form-item.check-item label { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px; padding-bottom: 8px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); }
+.modal-foot .btn-danger { margin-right: auto; }
+
+/* ---------- 演员别名设置 ---------- */
+.alias-tip {
+  margin: 0 0 14px; padding: 10px 12px; background: #f0f7ff; color: #39609e;
+  border-radius: 7px; font-size: 12px; line-height: 1.6;
+}
+.alias-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.alias-empty { padding: 20px; text-align: center; color: var(--muted); border: 1px dashed var(--border); border-radius: 8px; }
+.alias-group { padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: #fafbfc; }
+.alias-group-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.alias-group-label { font-weight: 600; font-size: 12px; color: var(--muted); }
+.alias-group-del { border: none; background: none; color: var(--red); font-size: 12px; padding: 2px 4px; }
+.alias-input-row { display: flex; gap: 6px; margin-bottom: 6px; }
+.alias-input-row input {
+  flex: 1; min-width: 0; height: 34px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 6px; outline: none; background: #fff;
+}
+.alias-input-row input:focus { border-color: var(--primary); }
+.alias-remove {
+  width: 34px; height: 34px; flex: none; border: 1px solid var(--border);
+  border-radius: 6px; background: #fff; color: var(--muted); font-size: 18px; line-height: 1;
+}
+.alias-remove:hover { color: var(--red); border-color: #f3bcbc; }
+.alias-add {
+  margin-top: 2px; border: none; background: none; color: var(--primary);
+  font-size: 12px; padding: 4px 0;
+}
 .toast {
   position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%); z-index: 100;
   background: #202632; color: #fff; padding: 10px 20px; border-radius: 8px; font-size: 13px;
