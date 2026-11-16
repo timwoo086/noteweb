@@ -1,0 +1,29 @@
+additionalProperties:
+  formFields:
+    - default: 5000
+      envKey: PANEL_APP_PORT_HTTP
+      labelEn: HTTP port
+      labelZh:  HTTP 端口
+      required: true
+      type: number
+      rule: paramPort
+    - default: admin
+      envKey: APP_PASSWORD
+      labelEn: Login password
+      labelZh:  登录密码
+      required: true
+      type: password
+      rule: paramCommon
+    - default: javlib-change-this-secret-key
+      envKey: SECRET_KEY
+      labelEn: Session secret key
+      labelZh:  会话密钥
+      required: true
+      type: text
+      rule: paramCommon
+    - default: ""
+      envKey: HTTP_PROXY
+      labelEn: HTTP proxy (optional, leave empty for direct)
+      labelZh:  HTTP 代理（可选，留空则直连）
+      required: false
+      type: text

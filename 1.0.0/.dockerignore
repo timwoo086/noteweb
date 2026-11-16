@@ -1,0 +1,6 @@
+data/movies.db
+data/covers/*
+!data/covers/.gitkeep
+__pycache__/
+*.pyc
+start_local.bat

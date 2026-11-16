@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>影片库</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">影片库 <span class="brand-count" id="totalCount">0</span></div>
+  <div class="topbar-actions">
+    <button class="btn-primary" id="addBtn">+ 录入影片</button>
+    <a class="btn-ghost" href="{{ url_for('logout') }}">退出</a>
+  </div>
+</header>
+
+<section class="searchbar">
+  <div class="field date-type">
+    <label>日期类型</label>
+    <div class="seg" id="dateTypeSeg" data-initial="{{ date_field }}">
+      <button type="button" class="seg-item" data-field="added_at">录入时间</button>
+      <button type="button" class="seg-item" data-field="release_date">发行时间</button>
+    </div>
+  </div>
+  <div class="field">
+    <label>开始</label>
+    <input type="date" id="dateFrom" value="{{ date_from }}">
+  </div>
+  <div class="field">
+    <label>结束</label>
+    <input type="date" id="dateTo" value="{{ date_to }}">
+  </div>
+  <div class="field">
+    <label>演员</label>
+    <select id="actressFilter" data-selected="{{ actress }}"><option value="">全部</option></select>
+  </div>
+  <div class="field grow">
+    <label>编号 / 标题</label>
+    <input type="text" id="keyword" value="{{ keyword }}" placeholder="搜索编号或标题">
+  </div>
+  <div class="field btns">
+    <button class="btn-primary" id="searchBtn">查询</button>
+    <button class="btn-ghost" id="resetBtn">重置</button>
+  </div>
+</section>
+
+<main class="grid" id="movieGrid"></main>
+<div class="empty" id="empty" hidden>没有符合条件的影片，换个筛选条件试试。</div>
+
+<!-- 录入 / 编辑 弹窗 -->
+<div class="modal" id="modal" hidden>
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2 id="modalTitle">录入影片</h2>
+      <button class="icon-btn" data-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="fetch-row">
+        <input type="text" id="fCode" placeholder="输入编号，如 ABP-123" autocomplete="off">
+        <button class="btn-primary" id="fetchBtn">抓取信息</button>
+      </div>
+      <div class="fetch-status" id="fetchStatus" hidden></div>
+
+      <div class="preview" id="preview" hidden>
+        <img id="previewCover" alt="封面">
+        <div class="preview-info">
+          <div class="preview-title" id="previewTitle"></div>
+          <div class="preview-meta" id="previewMeta"></div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-item"><label>编号 *</label><input id="fCode2"></div>
+        <div class="form-item full"><label>标题</label><input id="fTitle"></div>
+        <div class="form-item full"><label>演员（多个用逗号分隔）</label><input id="fActress"></div>
+        <div class="form-item"><label>发行时间</label><input type="date" id="fRelease"></div>
+        <div class="form-item"><label>录入时间</label><input type="date" id="fAdded"></div>
+        <div class="form-item"><label>分辨率</label>
+          <select id="fResolution"><option value="">未标注</option><option>4K</option><option>1080P</option><option>720P</option><option>480P</option></select>
+        </div>
+        <div class="form-item"><label>帧率</label>
+          <select id="fFramerate"><option value="">未标注</option><option>60fps</option><option>30fps</option><option>24fps</option></select>
+        </div>
+        <div class="form-item check-item"><label><input type="checkbox" id="fOriginal"> 原档</label></div>
+        <div class="form-item check-item"><label><input type="checkbox" id="fRemux"> REMUX</label></div>
+        <div class="form-item full"><label>下载地址</label><input id="fDownload" placeholder="磁力链接 / 网盘地址 / 本地路径"></div>
+        <div class="form-item full"><label>备注</label><input id="fNote"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" data-close>取消</button>
+      <button class="btn-primary" id="saveBtn">保存</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+additionalProperties:
+  key: javlib
+  name: 影片库
+  tags:
+    - WebSite
+    - Tool
+  shortDescZh: 从 JavBus/JavDB 按编号抓取影片信息与封面，本地归档并按日期或演员检索
+  shortDescEn: Fetch movie info and covers by code from JavBus/JavDB, archive locally and search by date or actress
+  type: website
+  crossVersionUpdate: true
+  limit: 0
+  website: https://www.javbus.com
+  github: ""
+  document: ""
