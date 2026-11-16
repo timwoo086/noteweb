@@ -4,6 +4,7 @@ const $ = (id) => document.getElementById(id);
 let currentDateField = 'added_at';
 let editingId = null;
 let lastScrapedCover = '';
+let lastScrapedCoverUrl = '';
 
 function toast(msg) {
   const el = $('toast');
@@ -71,9 +72,12 @@ function renderMovies(movies) {
     const card = document.createElement('div');
     card.className = 'movie-card';
 
+    // 封面：优先本地下载图，其次用抓取到的外链（no-referrer 规避防盗链）
     const cover = m.cover_path
       ? `<img src="/covers/${encodeURIComponent(m.cover_path)}" alt="封面" loading="lazy">`
-      : `<div class="cover-placeholder">暂无封面</div>`;
+      : m.cover_url
+        ? `<img src="${escapeHtml(m.cover_url)}" alt="封面" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-placeholder',textContent:'暂无封面'}))">`
+        : `<div class="cover-placeholder">暂无封面</div>`;
 
     const tags = [];
     if (m.resolution) tags.push(`<span class="tag tag-res">${escapeHtml(m.resolution)}</span>`);
@@ -142,6 +146,7 @@ async function copyLink(btn) {
 function openModal(id = null) {
   editingId = id;
   lastScrapedCover = '';
+  lastScrapedCoverUrl = '';
   $('modalTitle').textContent = id ? '编辑影片' : '录入影片';
   $('fetchStatus').hidden = true;
   $('preview').hidden = true;
@@ -166,7 +171,8 @@ function openModal(id = null) {
       $('fDownload').value = m.download_url || '';
       $('fNote').value = m.note || '';
       lastScrapedCover = m.cover_path || '';
-      if (m.cover_path) showPreview(m);
+      lastScrapedCoverUrl = m.cover_url || '';
+      if (m.cover_path || m.cover_url) showPreview(m);
     });
   }
   $('modal').hidden = false;
@@ -178,6 +184,11 @@ function closeModal() { $('modal').hidden = true; }
 function showPreview(data) {
   if (data.cover_path) {
     $('previewCover').src = '/covers/' + encodeURIComponent(data.cover_path) + '?t=' + Date.now();
+    $('previewCover').removeAttribute('referrerpolicy');
+    $('previewCover').style.display = '';
+  } else if (data.cover_url) {
+    $('previewCover').src = data.cover_url;
+    $('previewCover').setAttribute('referrerpolicy', 'no-referrer');
     $('previewCover').style.display = '';
   } else {
     $('previewCover').style.display = 'none';
@@ -213,7 +224,8 @@ async function doFetch() {
   $('fTitle').value = d.title;
   $('fActress').value = (d.actress || []).join(', ');
   $('fRelease').value = d.release_date || '';
-  if (d.cover_path) lastScrapedCover = d.cover_path;
+  lastScrapedCover = d.cover_path || '';
+  lastScrapedCoverUrl = d.cover_url || '';
   showPreview(d);
 
   const filled = [d.title && '标题', d.actress?.length && '演员', d.release_date && '发行时间'].filter(Boolean);
@@ -238,6 +250,7 @@ async function saveMovie() {
     download_url: $('fDownload').value.trim(),
     note: $('fNote').value.trim(),
     cover_path: lastScrapedCover,
+    cover_url: lastScrapedCoverUrl,
     source: $('fetchStatus').textContent.includes('已抓取') ? 'javbus/javdb' : 'manual'
   };
   if (!payload.code) { toast('编号不能为空'); return; }
