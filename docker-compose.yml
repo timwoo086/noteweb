@@ -1,0 +1,25 @@
+# 独立 Docker Compose 配置（不依赖 1Panel，可直接 docker compose up -d）
+# 构建上下文为 1.0.0/（源码所在目录）
+services:
+  javlib:
+    build: ./1.0.0
+    image: javlib:1.0.0
+    container_name: javlib
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-5000}:5000"
+    volumes:
+      # 数据库与封面持久化到宿主机，容器重建不丢数据
+      - ./1.0.0/data:/app/data
+    environment:
+      APP_PASSWORD: ${APP_PASSWORD:-admin}
+      SECRET_KEY: ${SECRET_KEY:-javlib-change-this-secret-key}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      DATA_DIR: /app/data
+      PORT: 5000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/login')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
