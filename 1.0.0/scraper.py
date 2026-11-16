@@ -29,82 +29,23 @@ HEADERS = {
     "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7",
 }
 
-# 演员名中文映射表：日文/繁体写法 -> 大陆通用简体中文名。
-# 抓取到的演员名会逐个查表转换成中文。可根据需要继续补充。
-# （左侧也可写繁体/日文假名写法，命中即替换为右侧中文名）
-ACTRESS_CN_MAP = {
-    "波多野結衣": "波多野结衣", "波多野衣結": "波多野结衣",
-    "三上悠亜": "三上悠亚", "三上悠亚": "三上悠亚",
-    "新ありな": "新有菜", "橋本有菜": "桥本有菜", "橋本ありな": "桥本有菜",
-    "明日花キララ": "明日花绮罗", "明日花綺羅": "明日花绮罗",
-    "河北彩花": "河北彩花", "河北彩伽": "河北彩花",
-    "弥生みづき": "弥生美月", "彌生美月": "弥生美月", "弥生美月": "弥生美月",
-    "逢坂真帆": "逢坂真帆", "星野ナミ": "星野奈美", "星野なみ": "星野奈美",
-    "神咲詩織": "神咲诗织", "神咲しおり": "神咲诗织",
-    "椎名そら": "椎名空", "椎名そら": "椎名空",
-    "白石茉莉奈": "白石茉莉奈", "白石まわり": "白石茉莉奈",
-    "沖田杏梨": "冲田杏梨", "冲田杏梨": "冲田杏梨",
-    "有成璃": "有成璃", "佐藤えり": "佐藤绘里",
-    "桐谷直葉": "桐谷直叶", "桐谷なお": "桐谷直叶",
-    "藍沢夏癒": "蓝泽夏愈", "篠崎愛": "筱崎爱",
-    "安室奈美恵": "安室奈美惠",
-    "吉沢明歩": "吉泽明步", "吉川蓮": "吉川莲",
-    "森下交": "森下交", "愛田奈々": "爱田奈奈",
-    "相沢みなみ": "相泽南", "相泽みなみ": "相泽南",
-    "岬ななみ": "岬奈奈美", "岬ななみ": "岬奈奈美",
-    "戸田真琴": "户田真琴", "户田真琴": "户田真琴",
-    "涼森れむ": "凉森梦", "涼森れむ": "凉森梦",
-    "関根和美": "关根和美", "關根和美": "关根和美",
-    # 常用罗马字 / 日文写法 -> 中文名（用于抓取后给候选）
-    "RION": "梨音", "りおん": "梨音", "梨音": "梨音",
-    "AIKA": "爱花", "あいか": "爱花",
-    "MEI": "芽衣", "めい": "芽衣",
-    "RIO": "里欧", "りお": "里欧",
-    "MOMO": "桃谷", "もも": "桃谷",
-}
-
-
-def actress_candidates(name, aliases=None):
-    """返回某演员的可选名字列表：中文名优先，其次同译名的日文/罗马字写法与别名组。"""
-    cn = to_chinese(name)
-    pool = []
-    if cn:
-        pool.append(cn)
-    # 同一中文译名对应的所有原文写法（如 梨音 <- RION / りおん）
-    for key, value in ACTRESS_CN_MAP.items():
-        if value == cn and key not in pool:
-            pool.append(key)
-    # 用户在「演员别名」里手动归过的组
-    for g in aliases or []:
-        members = [g.get("name", "")] + list(g.get("aliases", []))
-        if name in members or cn in members:
-            for m in members:
-                for v in (to_chinese(m), m):
-                    if v and v not in pool:
-                        pool.append(v)
-            break
-    if name and name not in pool:
-        pool.append(name)
-    return pool
+# 演员名归一：使用 avdb 完整映射表（actress_names.py），旧的常用映射保留为补充
+import actress_names
 
 
 def to_chinese(name):
-    """把演员名转成简体中文：先查映射表，再把常见日文/繁体字替换成简体。"""
-    if not name:
-        return name
-    name = name.strip()
-    if name in ACTRESS_CN_MAP:
-        return ACTRESS_CN_MAP[name]
-    # 繁体 -> 简体兜底转换（覆盖常见女优名用字）
-    simple_map = {
-        "結": "结", "亞": "亚", "亜": "亚", "橋": "桥",
-        "綺": "绮", "羅": "罗", "彌": "弥", "沢": "泽", "澤": "泽", "沖": "冲",
-        "愛": "爱", "恵": "惠", "詩": "诗", "織": "织", "戸": "户", "関": "关",
-        "涼": "凉", "飯": "饭", "岡": "冈", "姫": "姬", "麗": "丽", "華": "华",
-        "優": "优", "緒": "绪", "穂": "穗", "鈴": "铃",
-    }
-    converted = "".join(simple_map.get(ch, ch) for ch in name)
-    return converted
+    """把演员名转成规范中文名（avdb 映射表 + 繁简兜底）。"""
+    return actress_names.to_cn(name)
+
+
+def actress_candidates(name, aliases=None):
+    """返回同一演员的所有写法，中文名优先；用户自定义分组优先级最高。"""
+    return actress_names.candidates(name, aliases)
+
+
+def _is_chinese_name(name):
+    return actress_names.is_chinese(name)
+
 
 # ---------- 选择器表（改版时主要维护这里）----------
 # 标题
@@ -312,9 +253,19 @@ def fetch_javdb(code):
     return _parse_detail(detail.text, code, JAVDB_BASE)
 
 
+def _is_chinese_name(name):
+    """名字里含汉字（CJK 统一表意文字）视为中文名，优先级高于假名/罗马字。"""
+    return any("\u4e00" <= ch <= "\u9fff" for ch in (name or ""))
+
+
 def _merge(results):
-    """results: [(site, dict|None, err)] -> 合并后的 dict。"""
-    merged = {"title": "", "actress": [], "release_date": "", "cover_url": "", "source": "", "errors": []}
+    """results: [(site, dict|None, err)] -> 合并后的 dict。
+
+    演员名：javdb 用 locale=zh-CN 抓到的中文名优先；两站所有写法都收集到
+    actress_all，前端可据此把多个名字归一到一个中文名。
+    """
+    merged = {"title": "", "actress": [], "actress_all": [], "release_date": "",
+              "cover_url": "", "source": "", "errors": []}
     for site, data, err in results:
         if err:
             merged["errors"].append(f"{site}: {err}")
@@ -323,8 +274,19 @@ def _merge(results):
             continue
         if not merged["title"] and data.get("title"):
             merged["title"] = data["title"]
-        if not merged["actress"] and data.get("actress"):
-            merged["actress"] = data["actress"]
+        # 收集两站所有演员写法
+        for a in data.get("actress", []):
+            cn = to_chinese(a)
+            for v in (cn, a):
+                if v and v not in merged["actress_all"]:
+                    merged["actress_all"].append(v)
+        # 优先用中文名；javdb（中文站）优先于 javbus
+        names = [to_chinese(a) for a in data.get("actress", [])]
+        chinese = [n for n in names if _is_chinese_name(n)]
+        if site == "javdb" and chinese:
+            merged["actress"] = chinese
+        elif not merged["actress"] and names:
+            merged["actress"] = names
         if not merged["release_date"] and data.get("release_date"):
             merged["release_date"] = data["release_date"]
         if not merged["cover_url"] and data.get("cover_url"):
@@ -404,7 +366,7 @@ def scrape(code):
     """对外主入口：并发抓两站，合并字段并下载封面。永不抛异常。"""
     code = (code or "").strip().upper()
     if not code:
-        return {"code": "", "title": "", "actress": [], "release_date": "",
+        return {"code": "", "title": "", "actress": [], "actress_all": [], "release_date": "",
                 "cover_path": "", "source": "", "errors": ["编号不能为空"]}
 
     def run(site, fn):
@@ -426,6 +388,7 @@ def scrape(code):
         "code": code,
         "title": merged["title"],
         "actress": merged["actress"],
+        "actress_all": merged["actress_all"],
         "release_date": merged["release_date"],
         "cover_path": cover_path,
         "cover_url": merged["cover_url"],

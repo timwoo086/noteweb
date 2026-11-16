@@ -106,7 +106,12 @@ function renderMovies(movies) {
     section.className = 'date-group';
     const label = document.createElement('div');
     label.className = 'date-group-head';
-    label.innerHTML = `<h2>${escapeHtml(prettyDate(key))}</h2><span>${groups.get(key).length} 部</span>`;
+    label.innerHTML = `
+      <label class="date-check" title="勾选该日期的全部影片">
+        <input type="checkbox" class="date-group-check" data-date="${escapeHtml(key)}">
+        <span>${escapeHtml(prettyDate(key))}</span>
+      </label>
+      <span class="date-group-count">${groups.get(key).length} 部</span>`;
     section.appendChild(label);
     const cards = document.createElement('div');
     cards.className = 'date-group-grid';
@@ -150,8 +155,7 @@ function renderMovies(movies) {
           <button class="copy-btn" data-copy="${m.id}" data-url="${escapeHtml(m.download_url)}">复制</button>
           <button class="edit-btn" data-edit="${m.id}" title="编辑">✎</button>
           <label class="select-btn" title="勾选以多选">
-            <input type="checkbox" class="movie-check" data-id="${m.id}" data-url="${escapeHtml(m.download_url)}">
-            <span>多选</span>
+            <input type="checkbox" class="movie-check" data-id="${m.id}" data-url="${escapeHtml(m.download_url)}" data-date="${escapeHtml(dateGroupKey(m))}">
           </label>
         </div>
       </div>`;
@@ -227,6 +231,13 @@ function updateSelectUI() {
   const selAll = $('selectAll');
   selAll.checked = all.length > 0 && checked.length === all.length;
   selAll.indeterminate = checked.length > 0 && checked.length < all.length;
+  // 每组日期复选框状态：该组全选 / 部分选 / 未选
+  document.querySelectorAll('.date-group-check').forEach(dc => {
+    const boxes = [...document.querySelectorAll('.movie-check')].filter(c => c.dataset.date === dc.dataset.date);
+    const n = boxes.filter(c => c.checked).length;
+    dc.checked = boxes.length > 0 && n === boxes.length;
+    dc.indeterminate = n > 0 && n < boxes.length;
+  });
 }
 
 function bindSelectAll() {
@@ -236,6 +247,13 @@ function bindSelectAll() {
   });
   document.getElementById('movieGrid').addEventListener('change', e => {
     if (e.target.classList.contains('movie-check')) updateSelectUI();
+    if (e.target.classList.contains('date-group-check')) {
+      const date = e.target.dataset.date;
+      document.querySelectorAll('.movie-check').forEach(c => {
+        if (c.dataset.date === date) c.checked = e.target.checked;
+      });
+      updateSelectUI();
+    }
   });
   $('batchCopyBtn').addEventListener('click', async () => {
     const urls = selectedMovies()

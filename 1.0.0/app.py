@@ -96,11 +96,21 @@ def api_scrape():
     data = request.get_json(silent=True) or {}
     result = scraper.scrape(data.get("code", ""))
     aliases = db.load_aliases()
-    # 抓取到的每个演员都给出候选名：中文名优先，含别名组里的其他写法
-    result["actress_options"] = [
-        {"original": name, "candidates": scraper.actress_candidates(name, aliases)}
-        for name in result.get("actress", [])
-    ]
+    # 同一个演员的多个写法（javbus 日文名 + javdb 中文名）合并成一组候选，
+    # 统一指向一个中文名，中文名排在首位。
+    all_names = result.get("actress_all", []) or result.get("actress", [])
+    groups = []
+    for name in result.get("actress", []):
+        candidates = []
+        # 把映射到同一中文名的所有写法都收进来
+        for source_name in all_names:
+            for c in scraper.actress_candidates(source_name, aliases):
+                if c and c not in candidates:
+                    candidates.append(c)
+        # 中文名优先，其余保持原顺序
+        candidates.sort(key=lambda n: (not scraper._is_chinese_name(n), n != name))
+        groups.append({"original": name, "candidates": candidates})
+    result["actress_options"] = groups
     return jsonify({"ok": True, "data": result})
 
 
