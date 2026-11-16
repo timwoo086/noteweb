@@ -70,6 +70,17 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+function dateGroupKey(m) {
+  const value = (m[currentDateField] || '').slice(0, 10);
+  return value || '未标注日期';
+}
+
+function prettyDate(key) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return key;
+  const [y, m, d] = key.split('-');
+  return `${y}年${Number(m)}月${Number(d)}日`;
+}
+
 function renderMovies(movies) {
   const grid = $('movieGrid');
   grid.innerHTML = '';
@@ -77,7 +88,31 @@ function renderMovies(movies) {
   $('empty').hidden = movies.length > 0;
   $('empty').textContent = '没有符合条件的影片，换个筛选条件试试。';
 
+  // 按当前日期模式分组：同一天放一起，最新日期在最上面
+  const groups = new Map();
   movies.forEach(m => {
+    const key = dateGroupKey(m);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(m);
+  });
+  const sortedKeys = [...groups.keys()].sort((a, b) => {
+    if (a === '未标注日期') return 1;
+    if (b === '未标注日期') return -1;
+    return b.localeCompare(a);
+  });
+
+  sortedKeys.forEach(key => {
+    const section = document.createElement('section');
+    section.className = 'date-group';
+    const label = document.createElement('div');
+    label.className = 'date-group-head';
+    label.innerHTML = `<h2>${escapeHtml(prettyDate(key))}</h2><span>${groups.get(key).length} 部</span>`;
+    section.appendChild(label);
+    const cards = document.createElement('div');
+    cards.className = 'date-group-grid';
+    section.appendChild(cards);
+
+    groups.get(key).forEach(m => {
     const card = document.createElement('div');
     card.className = 'movie-card';
 
@@ -120,7 +155,9 @@ function renderMovies(movies) {
           </label>
         </div>
       </div>`;
-    grid.appendChild(card);
+    cards.appendChild(card);
+    });
+    grid.appendChild(section);
   });
 
   grid.querySelectorAll('[data-copy]').forEach(btn => {
