@@ -140,9 +140,8 @@ def list_movies(date_field="added_at", date_from="", date_to="", actress="", key
         args.extend([f"%{keyword}%", f"%{keyword}%"])
 
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
-    # 有日期筛选时按该日期排序，否则按录入时间倒序
-    order_field = date_field if (date_from or date_to) else "added_at"
-    sql = f"SELECT * FROM movies{where} ORDER BY {order_field} DESC, id DESC"
+    # 始终按当前日期模式倒序，最新日期排最上面；同日按 id 倒序
+    sql = f"SELECT * FROM movies{where} ORDER BY {date_field} DESC, id DESC"
     conn = connect()
     rows = conn.execute(sql, args).fetchall()
     conn.close()
