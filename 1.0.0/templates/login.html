@@ -9,8 +9,9 @@
 <body class="login-body">
   <form class="login-card" method="post" action="{{ url_for('login') }}">
     <div class="login-logo">影片库</div>
-    <p class="login-sub">请输入访问密码</p>
-    <input type="password" name="password" placeholder="密码" autofocus autocomplete="current-password" required>
+    <p class="login-sub">请输入账号和密码</p>
+    <input type="text" name="username" placeholder="账号" autofocus autocomplete="username" required>
+    <input type="password" name="password" placeholder="密码" autocomplete="current-password" required>
     {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
     <button type="submit" class="btn-primary">进入</button>
   </form>

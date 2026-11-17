@@ -8,7 +8,7 @@
 #   1) 1Panel：容器 → 编排 → 创建编排，把本文件内容粘贴进去，点「启动」
 #   2) 命令行：把本文件放到任意目录，执行 docker compose up -d
 #
-# 部署后访问：http://服务器IP:5000   默认密码：admin
+# 部署后访问：http://服务器IP:5000   初始账号：admin，初始密码见下方 APP_PASSWORD
 # ============================================================
 
 services:
@@ -38,7 +38,7 @@ services:
     # 环境变量：等号左边是变量名，右边 ${变量:-默认值} 表示可用外部同名的
     # .env 文件或系统环境变量覆盖，没设置时用 :- 后面的默认值。
     environment:
-      # 网页登录密码，部署前建议改成自己的（在 .env 里写 APP_PASSWORD=xxx）
+      # 初始管理员 admin 的密码（在 .env 里写 APP_PASSWORD=xxx）；升级后以此密码为准，后续改这里不会覆盖已建账号
       APP_PASSWORD: ${APP_PASSWORD:-admin}
       # Flask session 签名密钥，正式使用建议改成一段随机长字符串
       SECRET_KEY: ${SECRET_KEY:-javlib-change-this-secret-key}

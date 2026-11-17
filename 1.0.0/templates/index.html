@@ -6,11 +6,15 @@
 <title>影片库</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body data-is-admin="{{ '1' if is_admin else '0' }}" data-last-date="{{ last_date }}" data-username="{{ username }}">
 <header class="topbar">
   <div class="brand">影片库 <span class="brand-count" id="totalCount">0</span></div>
   <div class="topbar-actions">
+    {% if is_admin %}
     <button class="btn-primary" id="addBtn">+ 录入影片</button>
+    <button class="btn-ghost" id="createUserBtn">创建账号 <span class="admin-badge">仅管理员</span></button>
+    {% endif %}
+    <span class="user-name">{{ username }}</span>
     <a class="btn-ghost" href="{{ url_for('logout') }}">退出</a>
   </div>
 </header>
@@ -35,10 +39,12 @@
     <label>演员</label>
     <select id="actressFilter" data-selected="{{ actress }}"><option value="">全部</option></select>
   </div>
+  {% if is_admin %}
   <div class="field">
     <label>&nbsp;</label>
     <button class="btn-ghost" id="aliasManageBtn" title="把同一演员的多个名字合并">演员别名</button>
   </div>
+  {% endif %}
   <div class="field grow">
     <label>编号 / 标题</label>
     <input type="text" id="keyword" value="{{ keyword }}" placeholder="搜索编号或标题">
@@ -59,6 +65,7 @@
 <main class="grid" id="movieGrid"></main>
 <div class="empty" id="empty" hidden>没有符合条件的影片，换个筛选条件试试。</div>
 
+{% if is_admin %}
 <!-- 录入 / 编辑 弹窗 -->
 <div class="modal" id="modal" hidden>
   <div class="modal-backdrop" data-close></div>
@@ -115,7 +122,9 @@
     </div>
   </div>
 </div>
+{% endif %}
 
+{% if is_admin %}
 <!-- 演员别名设置弹窗 -->
 <div class="modal" id="aliasModal" hidden>
   <div class="modal-backdrop" data-alias-close></div>
@@ -135,6 +144,29 @@
     </div>
   </div>
 </div>
+
+<!-- 管理员创建账号 -->
+<div class="modal" id="userModal" hidden>
+  <div class="modal-backdrop" data-user-close></div>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h2>创建账号</h2>
+      <button class="icon-btn" data-user-close>&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="form-item full"><label>账号 *</label><input id="uName" placeholder="登录账号，不能含空格" autocomplete="off"></div>
+        <div class="form-item full"><label>密码 *</label><input type="password" id="uPass" placeholder="至少 4 位" autocomplete="new-password"></div>
+      </div>
+      <p class="alias-tip">新账号登录后只能查看、勾选和复制影片；录入、编辑、删除及演员别名设置仅管理员可用。</p>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" data-user-close>取消</button>
+      <button class="btn-primary" id="createUserSaveBtn">创建</button>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 <div class="toast" id="toast" hidden></div>
 <script src="{{ url_for('static', filename='app.js') }}"></script>

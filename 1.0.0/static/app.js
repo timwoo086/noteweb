@@ -6,6 +6,8 @@ let editingId = null;
 let lastScrapedCover = '';
 let lastScrapedCoverUrl = '';
 let actressOptions = [];
+const isAdmin = document.body.dataset.isAdmin === '1';
+let lastDate = document.body.dataset.lastDate || '';
 
 function toast(msg) {
   const el = $('toast');
@@ -19,6 +21,16 @@ async function api(url, options = {}) {
   const r = await fetch(url, options);
   if (r.status === 401) { location.href = '/login'; return null; }
   return r.json();
+}
+
+// 记住当前账号最近操作的日期分组，首页在该日期旁显示红字
+async function setLastPosition(dateKey, movieId = 0) {
+  if (!dateKey) return;
+  lastDate = dateKey;
+  await api('/api/last-position', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({date: dateKey, movie_id: movieId || 0})
+  });
 }
 
 // ---------- 筛选栏 ----------
@@ -118,6 +130,7 @@ function renderMovies(movies) {
         <input type="checkbox" class="date-group-check" data-date="${escapeHtml(key)}">
         <span>${escapeHtml(prettyDate(key))}</span>
       </label>
+      ${key === lastDate ? '<span class="last-here">（上次到这里）</span>' : ''}
       <span class="date-group-count">${groups.get(key).length} 部</span>`;
     section.appendChild(label);
     const cards = document.createElement('div');
@@ -151,13 +164,13 @@ function renderMovies(movies) {
       `<span class="actress-link" data-actress="${escapeHtml(a)}" title="点击筛选该演员">${escapeHtml(a)}</span>`
     ).join('、');
     card.innerHTML = `
-      <a class="cover-wrap detail-link" href="/movie/${m.id}" title="查看详情">
+      <a class="cover-wrap detail-link" href="/movie/${m.id}?date_field=${encodeURIComponent(currentDateField)}&date=${encodeURIComponent(dateGroupKey(m))}" title="查看详情">
         ${cover}
         <span class="code-badge">${escapeHtml(m.code)}</span>
       </a>
       <div class="card-body">
         ${tags.length ? `<div class="tags">${tags.join('')}</div>` : ''}
-        <a class="card-title detail-link" href="/movie/${m.id}" title="查看详情">${escapeHtml(m.title) || '&nbsp;'}</a>
+        <a class="card-title detail-link" href="/movie/${m.id}?date_field=${encodeURIComponent(currentDateField)}&date=${encodeURIComponent(dateGroupKey(m))}" title="查看详情">${escapeHtml(m.title) || '&nbsp;'}</a>
         <div class="card-actress">${actressLinks || '&nbsp;'}</div>
         <div class="card-dates">
           <span>发行 <b>${escapeHtml(m.release_date) || '-'}</b></span>
@@ -165,8 +178,8 @@ function renderMovies(movies) {
         </div>
         <div class="card-foot">
           <button class="copy-btn" data-copy="${m.id}" data-url="${escapeHtml(m.download_url)}">复制</button>
-          <button class="edit-btn" data-edit="${m.id}" title="编辑">✎</button>
-          <button class="card-del-btn" data-del="${m.id}" title="删除此影片">✕</button>
+          ${isAdmin ? `<button class="edit-btn" data-edit="${m.id}" title="编辑">✎</button>
+          <button class="card-del-btn" data-del="${m.id}" title="删除此影片">✕</button>` : ''}
           <label class="select-btn" title="勾选以多选">
             <input type="checkbox" class="movie-check" data-id="${m.id}" data-url="${escapeHtml(m.download_url)}" data-date="${escapeHtml(dateGroupKey(m))}">
           </label>
@@ -328,7 +341,7 @@ function openModal(id = null) {
   setTimeout(() => $('fCode').focus(), 50);
 }
 
-function closeModal() { $('modal').hidden = true; }
+function closeModal() { const el = $('modal'); if (el) el.hidden = true; }
 
 function showPreview(data) {
   if (data.cover_path) {
@@ -472,6 +485,11 @@ async function saveMovie() {
     body: JSON.stringify(payload)
   });
   if (!res || !res.ok) { toast(res?.error || '保存失败'); return; }
+  const today = new Date().toLocaleDateString('sv-SE');
+  const dateKey = currentDateField === 'release_date'
+    ? (payload.release_date || '未标注日期')
+    : (payload.added_at || today);
+  await setLastPosition(dateKey, editingId || 0);
   toast(editingId ? '已更新' : '已入库');
   closeModal();
   loadMovies();
@@ -479,8 +497,14 @@ async function saveMovie() {
 
 async function removeMovie(id) {
   if (!confirm('确定删除这条记录吗？封面也会一并删除。')) return;
+  const box = document.querySelector(`.movie-check[data-id="${id}"]`);
+  const dateKey = box ? box.dataset.date : '';
   const res = await api('/api/movies/' + id, {method: 'DELETE'});
-  if (res && res.ok) { toast('已删除'); loadMovies(); }
+  if (res && res.ok) {
+    await setLastPosition(dateKey, id);
+    toast('已删除');
+    loadMovies();
+  }
 }
 
 // ---------- 演员别名设置 ----------
@@ -600,6 +624,29 @@ async function saveAliases() {
   await loadMovies();
 }
 
+// ---------- 管理员创建账号 ----------
+function openUserModal() {
+  $('uName').value = '';
+  $('uPass').value = '';
+  $('userModal').hidden = false;
+  setTimeout(() => $('uName').focus(), 50);
+}
+
+function closeUserModal() { $('userModal').hidden = true; }
+
+async function createUser() {
+  const username = $('uName').value.trim();
+  const password = $('uPass').value;
+  if (!username || !password) { toast('请填写账号和密码'); return; }
+  const res = await api('/api/users', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({username, password})
+  });
+  if (!res || !res.ok) { toast(res?.error || '创建失败'); return; }
+  toast(`账号 ${res.user.username} 已创建`);
+  closeUserModal();
+}
+
 // ---------- 事件绑定 ----------
 function bind() {
   $('searchBtn').addEventListener('click', loadMovies);
@@ -609,27 +656,37 @@ function bind() {
     initDateSeg(); loadMovies();
   });
   $('keyword').addEventListener('keydown', e => { if (e.key === 'Enter') loadMovies(); });
-  $('addBtn').addEventListener('click', () => openModal());
-  $('fetchBtn').addEventListener('click', doFetch);
-  $('saveBtn').addEventListener('click', saveMovie);
-  $('deleteBtn').addEventListener('click', () => {
-    if (editingId) removeMovie(editingId);
-  });
-  document.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeModal));
-  // 演员别名弹窗
-  $('aliasManageBtn').addEventListener('click', openAliasModal);
-  $('addAliasGroupBtn').addEventListener('click', () => {
-    syncAliasGroups();
-    aliasGroups.push({ name: '', aliases: [] });
-    renderAliasGroups();
-    const inputs = $('aliasList').querySelectorAll('.alias-group:last-child .alias-input-row input');
-    if (inputs.length) inputs[0].focus();
-  });
-  $('saveAliasBtn').addEventListener('click', saveAliases);
-  document.querySelectorAll('[data-alias-close]').forEach(el => el.addEventListener('click', closeAliasModal));
+  if ($('addBtn')) $('addBtn').addEventListener('click', () => openModal());
+  if ($('createUserBtn')) {
+    $('createUserBtn').addEventListener('click', openUserModal);
+    $('createUserSaveBtn').addEventListener('click', createUser);
+    document.querySelectorAll('[data-user-close]').forEach(el => el.addEventListener('click', closeUserModal));
+  }
+  if ($('fetchBtn')) {
+    $('fetchBtn').addEventListener('click', doFetch);
+    $('saveBtn').addEventListener('click', saveMovie);
+    $('deleteBtn').addEventListener('click', () => {
+      if (editingId) removeMovie(editingId);
+    });
+    document.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeModal));
+  }
+  // 演员别名弹窗（仅管理员显示入口与弹窗）
+  if ($('aliasManageBtn')) {
+    $('aliasManageBtn').addEventListener('click', openAliasModal);
+    $('addAliasGroupBtn').addEventListener('click', () => {
+      syncAliasGroups();
+      aliasGroups.push({ name: '', aliases: [] });
+      renderAliasGroups();
+      const inputs = $('aliasList').querySelectorAll('.alias-group:last-child .alias-input-row input');
+      if (inputs.length) inputs[0].focus();
+    });
+    $('saveAliasBtn').addEventListener('click', saveAliases);
+    document.querySelectorAll('[data-alias-close]').forEach(el => el.addEventListener('click', closeAliasModal));
+  }
   document.addEventListener('keydown', e => {
     if (e.key !== 'Escape') return;
-    if (!$('aliasModal').hidden) closeAliasModal();
+    if ($('userModal') && !$('userModal').hidden) closeUserModal();
+    else if ($('aliasModal') && !$('aliasModal').hidden) closeAliasModal();
     else closeModal();
   });
   bindSelectAll();
@@ -640,8 +697,8 @@ async function init() {
   bind();
   await loadActresses();
   await loadMovies();
-  // 从详情页点「编辑」回来时自动打开对应弹窗
+  // 从详情页点「编辑」回来时自动打开对应弹窗（普通账号不能编辑）
   const editId = new URLSearchParams(location.search).get('edit');
-  if (editId) openModal(Number(editId));
+  if (editId && isAdmin) openModal(Number(editId));
 }
 init();

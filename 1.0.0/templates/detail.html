@@ -10,7 +10,7 @@
 <header class="topbar">
   <div class="brand"><a class="brand-link" href="/">影片库</a> <span class="brand-sep">/</span> <span class="brand-code">{{ movie.code }}</span></div>
   <div class="topbar-actions">
-    <button class="btn-ghost" id="editBtn">编辑</button>
+    {% if is_admin %}<button class="btn-ghost" id="editBtn">编辑</button>{% endif %}
     <a class="btn-ghost" href="/">返回列表</a>
     <a class="btn-ghost" href="{{ url_for('logout') }}">退出</a>
   </div>
@@ -74,7 +74,7 @@
         {% if movie.download_url %}
           <div class="detail-url" id="downloadUrl">{{ movie.download_url }}</div>
         {% else %}
-          <div class="detail-url detail-url-empty">尚未录入，点右上角「编辑」补充。</div>
+          <div class="detail-url detail-url-empty">{% if is_admin %}尚未录入，点右上角「编辑」补充。{% else %}尚未录入，请联系管理员补充。{% endif %}</div>
         {% endif %}
       </div>
 

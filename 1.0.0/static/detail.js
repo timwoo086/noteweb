@@ -29,8 +29,11 @@ $('copyBtn').addEventListener('click', async () => {
   toast('下载地址已复制');
 });
 
-// 编辑按钮回到列表并自动打开录入/编辑弹窗
-$('editBtn').addEventListener('click', () => {
-  const id = location.pathname.split('/').pop();
-  location.href = '/?edit=' + encodeURIComponent(id);
-});
+// 编辑按钮回到列表并自动打开录入/编辑弹窗（普通账号没有此按钮）
+const editBtn = $('editBtn');
+if (editBtn) {
+  editBtn.addEventListener('click', () => {
+    const id = location.pathname.split('/').pop();
+    location.href = '/?edit=' + encodeURIComponent(id);
+  });
+}

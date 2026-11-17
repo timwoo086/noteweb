@@ -16,13 +16,32 @@ app.secret_key = config.SECRET_KEY
 db.init_db()
 
 
+def current_user():
+    """获取当前登录用户；会话失效时返回 None。"""
+    username = session.get("username")
+    return db.get_user(username) if username else None
+
+
 def login_required(view):
     @functools.wraps(view)
     def wrapped(*args, **kwargs):
-        if not session.get("logged_in"):
+        if not current_user():
+            session.pop("username", None)
             if request.is_json or request.path.startswith("/api/"):
                 return jsonify({"ok": False, "error": "未登录"}), 401
             return redirect(url_for("login"))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def admin_required(view):
+    """只允许管理员修改数据；普通账号只能查看、勾选和复制。"""
+    @functools.wraps(view)
+    def wrapped(*args, **kwargs):
+        user = current_user()
+        if not user or not user["is_admin"]:
+            return jsonify({"ok": False, "error": "需要管理员权限"}), 403
         return view(*args, **kwargs)
 
     return wrapped
@@ -32,22 +51,27 @@ def login_required(view):
 def login():
     error = ""
     if request.method == "POST":
-        if request.form.get("password", "") == config.APP_PASSWORD:
-            session["logged_in"] = True
+        user = db.verify_user(
+            request.form.get("username", "").strip(),
+            request.form.get("password", ""),
+        )
+        if user:
+            session["username"] = user["username"]
             return redirect(url_for("index"))
-        error = "密码错误"
+        error = "账号或密码错误"
     return render_template("login.html", error=error)
 
 
 @app.route("/logout")
 def logout():
-    session.pop("logged_in", None)
+    session.pop("username", None)
     return redirect(url_for("login"))
 
 
 @app.route("/")
 @login_required
 def index():
+    user = current_user()
     date_field = request.args.get("date_field", "added_at")
     return render_template(
         "index.html",
@@ -56,6 +80,9 @@ def index():
         date_to=request.args.get("date_to", ""),
         actress=request.args.get("actress", ""),
         keyword=request.args.get("keyword", ""),
+        username=user["username"],
+        is_admin=user["is_admin"],
+        last_date=user["last_date"],
     )
 
 
@@ -83,6 +110,9 @@ def api_actresses():
 def api_aliases():
     """演员别名分组：同一人多个名字合并，点击任一名字筛出全部影片。"""
     if request.method == "POST":
+        user = current_user()
+        if not user or not user["is_admin"]:
+            return jsonify({"ok": False, "error": "需要管理员权限"}), 403
         data = request.get_json(silent=True) or {}
         groups = data.get("aliases", [])
         db.save_aliases(groups)
@@ -128,6 +158,7 @@ def api_actress_candidates():
 
 @app.route("/api/movies", methods=["POST"])
 @login_required
+@admin_required
 def api_create():
     data = request.get_json(silent=True) or {}
     try:
@@ -143,6 +174,10 @@ def api_movie(movie_id):
     if request.method == "GET":
         movie = db.get_movie(movie_id)
         return jsonify({"ok": True, "movie": movie}) if movie else (jsonify({"ok": False}), 404)
+
+    user = current_user()
+    if not user or not user["is_admin"]:
+        return jsonify({"ok": False, "error": "需要管理员权限"}), 403
 
     if request.method == "DELETE":
         db.delete_movie(movie_id)
@@ -162,7 +197,37 @@ def movie_detail(movie_id):
     movie = db.get_movie(movie_id)
     if not movie:
         return redirect(url_for("index"))
-    return render_template("detail.html", movie=movie)
+    user = current_user()
+    # 详情页也更新该账号的上次位置；日期由列表页链接带入，兼容旧链接则回退到录入日期
+    date_key = request.args.get("date") or (movie.get("added_at") or "")[:10]
+    db.set_last_position(user["username"], date_key, movie_id)
+    return render_template("detail.html", movie=movie, is_admin=user["is_admin"])
+
+
+@app.route("/api/users", methods=["POST"])
+@login_required
+@admin_required
+def api_create_user():
+    """管理员创建账号。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        user = db.create_user(data.get("username", ""), data.get("password", ""))
+        return jsonify({"ok": True, "user": user})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/last-position", methods=["POST"])
+@login_required
+def api_last_position():
+    """记录当前账号最近操作的日期分组，供首页显示红字。"""
+    data = request.get_json(silent=True) or {}
+    db.set_last_position(
+        session["username"],
+        data.get("date", ""),
+        data.get("movie_id", 0),
+    )
+    return jsonify({"ok": True})
 
 
 @app.route("/covers/<path:filename>")

@@ -33,6 +33,11 @@ button { cursor: pointer; }
   font-size: 12px; font-weight: 600; text-align: center; vertical-align: middle;
 }
 .topbar-actions { display: flex; gap: 10px; align-items: center; }
+.user-name { color: var(--muted); font-size: 13px; }
+.admin-badge {
+  display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 10px;
+  background: #eef3ff; color: var(--primary); font-size: 11px; font-weight: 500;
+}
 
 /* ---------- 按钮 ---------- */
 .btn-primary {
@@ -95,6 +100,10 @@ button { cursor: pointer; }
 .date-group-head span {
   background: #eef3ff; color: var(--primary); border-radius: 20px;
   padding: 1px 8px; font-size: 11px; font-weight: 500;
+}
+.date-group-head .last-here {
+  background: transparent; color: var(--red); padding: 0;
+  font-size: 13px; font-weight: 600;
 }
 .date-group-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(288px, 1fr)); gap: 16px;

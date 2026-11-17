@@ -4,7 +4,9 @@ import os
 import sqlite3
 from datetime import datetime
 
-from config import DB_PATH, COVER_DIR
+from werkzeug.security import generate_password_hash, check_password_hash
+
+from config import DB_PATH, COVER_DIR, APP_PASSWORD
 
 # 演员别名配置：JSON 文件，结构为 [{"name": 规范名, "aliases": [别名1, 别名2]}, ...]
 # 同一组内的名字视为同一个演员，点击任一名字都会筛出整组影片。
@@ -91,6 +93,28 @@ def init_db():
         conn.execute("ALTER TABLE movies ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
     if "is_bluray" not in cols:
         conn.execute("ALTER TABLE movies ADD COLUMN is_bluray INTEGER NOT NULL DEFAULT 0")
+
+    # 多账号：用户名 + 密码哈希，last_date 记录该账号最近操作的日期分组
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            username      TEXT PRIMARY KEY COLLATE NOCASE,
+            password_hash TEXT NOT NULL,
+            is_admin      INTEGER NOT NULL DEFAULT 0,
+            last_date     TEXT NOT NULL DEFAULT '',
+            last_movie_id INTEGER NOT NULL DEFAULT 0,
+            created_at    TEXT NOT NULL,
+            updated_at    TEXT NOT NULL
+        )
+        """
+    )
+    # 首次升级时用原 APP_PASSWORD 建立管理员账号，老密码可继续登录
+    if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT INTO users (username,password_hash,is_admin,created_at,updated_at) VALUES (?,?,?,?,?)",
+            ("admin", generate_password_hash(APP_PASSWORD), 1, now, now),
+        )
     conn.commit()
     conn.close()
 
@@ -246,5 +270,74 @@ def delete_movie(movie_id):
                 pass
     conn = connect()
     conn.execute("DELETE FROM movies WHERE id=?", (movie_id,))
+    conn.commit()
+    conn.close()
+
+
+def _user_to_dict(row):
+    """返回可安全传给前端的用户信息，不带密码哈希。"""
+    if row is None:
+        return None
+    return {
+        "username": row["username"],
+        "is_admin": bool(row["is_admin"]),
+        "last_date": row["last_date"] or "",
+        "last_movie_id": row["last_movie_id"] or 0,
+    }
+
+
+def get_user(username):
+    conn = connect()
+    row = conn.execute("SELECT * FROM users WHERE username=?", (username,)).fetchone()
+    conn.close()
+    return _user_to_dict(row)
+
+
+def verify_user(username, password):
+    """账号 + 密码校验，成功返回用户信息（不含哈希）。"""
+    conn = connect()
+    row = conn.execute("SELECT * FROM users WHERE username=?", (username or "",)).fetchone()
+    conn.close()
+    if row and check_password_hash(row["password_hash"], password or ""):
+        return _user_to_dict(row)
+    return None
+
+
+def create_user(username, password, is_admin=False):
+    """管理员建号。用户名唯一，密码至少 4 位。"""
+    username = str(username or "").strip()
+    password = str(password or "")
+    if not username or any(ch.isspace() for ch in username):
+        raise ValueError("账号不能为空且不能包含空格")
+    if len(password) < 4:
+        raise ValueError("密码至少 4 位")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    conn = connect()
+    try:
+        conn.execute(
+            """INSERT INTO users (username,password_hash,is_admin,created_at,updated_at)
+               VALUES (?,?,?,?,?)""",
+            (username, generate_password_hash(password), 1 if is_admin else 0, now, now),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        raise ValueError(f"账号 {username} 已存在")
+    conn.close()
+    return get_user(username)
+
+
+def set_last_position(username, date_key, movie_id=0):
+    """记住某账号最近操作的日期分组，用于首页红字「上次到这里」。"""
+    date_key = str(date_key or "").strip()[:50]
+    try:
+        movie_id = int(movie_id or 0)
+    except (TypeError, ValueError):
+        movie_id = 0
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET last_date=?, last_movie_id=?, updated_at=? WHERE username=?",
+        (date_key, movie_id, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), username),
+    )
     conn.commit()
     conn.close()
