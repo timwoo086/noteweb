@@ -93,13 +93,17 @@
         <div class="form-item"><label>发行时间</label><input type="date" id="fRelease"></div>
         <div class="form-item"><label>录入时间</label><input type="date" id="fAdded"></div>
         <div class="form-item"><label>分辨率</label>
-          <select id="fResolution"><option value="">未标注</option><option>4K</option><option>1080P</option><option>720P</option><option>480P</option></select>
+          <div class="check-row">
+            <label><input type="checkbox" id="fRes4K"> 4K</label>
+            <label><input type="checkbox" id="fRes1080"> 1080P</label>
+          </div>
         </div>
         <div class="form-item"><label>帧率</label>
-          <select id="fFramerate"><option value="">未标注</option><option>60fps</option><option>30fps</option><option>24fps</option></select>
+          <div class="fps-input"><input type="text" id="fFramerate" placeholder="如 59.94"><span>fps</span></div>
         </div>
-        <div class="form-item check-item"><label><input type="checkbox" id="fOriginal"> 原档</label></div>
-        <div class="form-item check-item"><label><input type="checkbox" id="fRemux"> REMUX</label></div>
+        <div class="form-item check-item"><label><input type="checkbox" id="fOriginal"> 原盘</label></div>
+        <div class="form-item check-item"><label><input type="checkbox" id="fBluray"> 蓝光</label></div>
+        <div class="form-item check-item"><label><input type="checkbox" id="fRemux"> Remux</label></div>
         <div class="form-item full"><label>下载地址</label><input id="fDownload" placeholder="磁力链接 / 网盘地址 / 本地路径"></div>
         <div class="form-item full"><label>备注</label><input id="fNote"></div>
       </div>
