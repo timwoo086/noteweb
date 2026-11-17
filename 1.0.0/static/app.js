@@ -143,7 +143,7 @@ function renderMovies(movies) {
 
     // 封面：优先本地下载图，其次用抓取到的外链（no-referrer 规避防盗链）
     const cover = m.cover_path
-      ? `<img src="/thumbs/${encodeURIComponent(m.cover_path)}" alt="封面" loading="lazy">`
+      ? `<img src="/thumbs/${encodeURIComponent(m.cover_path)}?v=${encodeURIComponent(m.updated_at || '')}" alt="封面" loading="lazy">`
       : m.cover_url
         ? `<img src="${escapeHtml(m.cover_url)}" alt="封面" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-placeholder',textContent:'暂无封面'}))">`
         : `<div class="cover-placeholder">暂无封面</div>`;

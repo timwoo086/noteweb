@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>影片库</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_ver }}">
 </head>
 <body data-is-admin="{{ '1' if is_admin else '0' }}" data-last-date="{{ last_date }}" data-username="{{ username }}">
 <header class="topbar">
@@ -169,6 +169,6 @@
 {% endif %}
 
 <div class="toast" id="toast" hidden></div>
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='app.js') }}?v={{ asset_ver }}"></script>
 </body>
 </html>

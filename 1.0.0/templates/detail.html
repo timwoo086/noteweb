@@ -4,7 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{{ movie.code }} - 影片库</title>
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+{% set cover_src = '/covers/' ~ (movie.cover_path | urlencode) ~ '?v=' ~ (movie.updated_at | urlencode) if movie.cover_path else '' %}
+{% if cover_src %}<link rel="preload" as="image" href="{{ cover_src }}">{% endif %}
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_ver }}">
 </head>
 <body>
 <header class="topbar">
@@ -20,7 +22,7 @@
   <div class="detail-card">
     <div class="detail-cover-col">
       {% if movie.cover_path %}
-        <img class="detail-cover" src="/covers/{{ movie.cover_path | urlencode }}" alt="{{ movie.code }} 封面">
+        <img class="detail-cover" src="{{ cover_src }}" alt="{{ movie.code }} 封面">
       {% elif movie.cover_url %}
         <img class="detail-cover" src="{{ movie.cover_url }}" alt="{{ movie.code }} 封面" referrerpolicy="no-referrer">
       {% else %}
@@ -86,6 +88,6 @@
 </main>
 
 <div class="toast" id="toast" hidden></div>
-<script src="{{ url_for('static', filename='detail.js') }}"></script>
+<script src="{{ url_for('static', filename='detail.js') }}?v={{ asset_ver }}"></script>
 </body>
 </html>

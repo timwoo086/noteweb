@@ -1,6 +1,8 @@
 """影片管理库：Flask 单服务（页面 + API + 抓取 + 静态封面）。"""
 import functools
 import os
+import threading
+from collections import defaultdict
 
 from flask import (
     Flask, jsonify, redirect, render_template, request,
@@ -14,6 +16,32 @@ import scraper
 app = Flask(__name__)
 app.secret_key = config.SECRET_KEY
 db.init_db()
+
+# 详情页封面压缩尺寸与静态资源版本号（模板用 ?v= 做缓存刷新）
+DETAIL_COVER_MAX_WIDTH = 640
+DETAIL_COVER_QUALITY = 82
+_detail_cover_locks = defaultdict(threading.Lock)
+STATIC_DIR = os.path.join(config.BASE_DIR, "static")
+ASSET_VERSION = str(int(max(
+    os.path.getmtime(os.path.join(STATIC_DIR, name))
+    for name in ("style.css", "app.js", "detail.js")
+)))
+
+
+@app.context_processor
+def inject_asset_version():
+    return {"asset_ver": ASSET_VERSION}
+
+
+@app.after_request
+def add_cache_headers(response):
+    path = request.path
+    if path.startswith("/static/"):
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    elif path.startswith("/covers/") or path.startswith("/thumbs/"):
+        # 仍需登录才能访问，只允许浏览器私有缓存，不进共享缓存/CDN
+        response.headers["Cache-Control"] = "private, max-age=86400"
+    return response
 
 
 def current_user():
@@ -230,9 +258,44 @@ def api_last_position():
     return jsonify({"ok": True})
 
 
+def optimized_detail_cover(filename):
+    """生成详情页用的中等尺寸封面；失败时返回 None 由原图兜底。"""
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        return None
+    src = os.path.join(config.COVER_DIR, filename)
+    if not os.path.isfile(src):
+        return None
+    detail_dir = os.path.join(config.COVER_DIR, "detail")
+    os.makedirs(detail_dir, exist_ok=True)
+    out_name = os.path.splitext(os.path.basename(filename))[0] + ".jpg"
+    out = os.path.join(detail_dir, out_name)
+
+    def fresh():
+        return os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(src)
+
+    try:
+        if fresh():
+            return out
+        with _detail_cover_locks[out_name]:
+            if fresh():
+                return out
+            from PIL import Image
+            with Image.open(src) as im:
+                im = im.convert("RGB")
+                im.thumbnail((DETAIL_COVER_MAX_WIDTH, DETAIL_COVER_MAX_WIDTH))
+                im.save(out, "JPEG", quality=DETAIL_COVER_QUALITY, optimize=True, progressive=True)
+        return out if os.path.isfile(out) else None
+    except Exception:
+        return None
+
+
 @app.route("/covers/<path:filename>")
 @login_required
 def cover(filename):
+    target = optimized_detail_cover(filename)
+    if target:
+        return send_from_directory(os.path.dirname(target), os.path.basename(target))
     return send_from_directory(config.COVER_DIR, filename)
 
 
