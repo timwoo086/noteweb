@@ -1,9 +1,11 @@
 """多站抓取解析器。
 
-JavBus : 编号直达详情页 https://www.javbus.com/<CODE>
-JavDB  : 先搜索 https://javdb.com/search?q=<CODE>&f=all 命中后进入详情页
-AVBase : https://www.avbase.net/works/<CODE>，补 JavDB/JavBus 缺标题和演员
-DMM    : https://www.dmm.co.jp/...，按番号推断 CID，作为标题/演员/封面兜底
+JavBus  : 编号直达详情页 https://www.javbus.com/<CODE>
+MissAV  : https://missav123.com/<code小写>，标题/演员/日期/封面，需过 Cloudflare（curl_cffi 模拟浏览器指纹）
+JavDB   : 先搜索 https://javdb.com/search?q=<CODE>&f=all 命中后进入详情页；搜索有登录墙，
+          配置环境变量 JAVDB_COOKIES（浏览器复制的 Cookie）后可免登录抓取
+AVBase  : https://www.avbase.net/works/<CODE>，补 JavDB/JavBus 缺标题和演员
+DMM     : https://www.dmm.co.jp/...，按番号推断 CID，作为标题/演员/封面兜底
 
 设计要点：
 1. 选择器集中放在顶部常量列表，站点改版时只改这一处；每个字段配多个候选选择器容错。
@@ -18,19 +20,33 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-from config import COVER_DIR, HTTP_PROXY, REQUEST_TIMEOUT, RETRY
+from config import COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, REQUEST_TIMEOUT, RETRY
 
 JAVBUS_BASE = "https://www.javbus.com"
 JAVDB_BASE = "https://javdb.com"
+MISSAV_BASE = "https://missav123.com"
 AVBASE_BASE = "https://www.avbase.net"
 DMM_BASE = "https://www.dmm.co.jp"
+
+# curl_cffi 可选：能模拟浏览器 TLS 指纹，过一部分 Cloudflare 拦截
+try:
+    from curl_cffi import requests as _creq
+except ImportError:  # pragma: no cover
+    _creq = None
 
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
     ),
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;q=0.9,"
+        "image/avif,image/webp,*/*;q=0.8"
+    ),
     "Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8,en;q=0.7",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Upgrade-Insecure-Requests": "1",
 }
 
 # 演员名归一：使用 avdb 完整映射表（actress_names.py），旧的常用映射保留为补充
@@ -54,6 +70,9 @@ def _is_chinese_name(name):
 # ---------- 选择器表（改版时主要维护这里）----------
 # 标题
 TITLE_SELECTORS = [
+    # JavDB 详情页标题（current-title 为番号+标题正文）
+    ".current-title",
+    "h2.title",
     "h1",
     "h3",
     "div.info h3",
@@ -101,6 +120,9 @@ COVER_SELECTORS = [
 
 DATE_RE = re.compile(r"(20\d{2})[-/年.](\d{1,2})[-/月.](\d{1,2})")
 
+# MissAV 详情页的元数据标签（繁体），按标签取值比选择器稳
+MISSAV_LABELS = ("發行日期", "番號", "標題", "女優")
+
 
 def _proxies():
     """显式返回代理 dict；空串时用空 dict 禁用系统环境里的代理，保证真正直连。"""
@@ -109,12 +131,42 @@ def _proxies():
     return {"http": None, "https": None}
 
 
-def _get(url, cookies=None):
+# 共享 Session：trust_env=False 屏蔽系统环境变量里的代理，
+# 代理只认 config.HTTP_PROXY，避免 ambient 环境变量劫持请求
+_session = requests.Session()
+_session.trust_env = False
+
+
+def _impersonate_get(url, cookies=None):
+    """带浏览器 TLS 指纹的 GET（curl_cffi），用于有 Cloudflare 的站点。
+
+    curl_cffi 缺失或代理协议不兼容时回退到普通 requests。
+    """
+    if _creq is not None:
+        try:
+            # 4xx（含 CF 挑战页 403）也返回响应体，由调用方按页面特征给出明确报错
+            return _creq.get(
+                url, impersonate="chrome124", timeout=REQUEST_TIMEOUT,
+                proxies=_proxies() or None, cookies=cookies,
+                allow_redirects=True,
+            )
+        except ImportError:
+            pass
+        except Exception:
+            # 指纹请求失败（如代理协议不兼容）时退回普通 requests 再试一次
+            pass
+    return _get(url, cookies=cookies)
+
+
+def _get(url, cookies=None, extra_headers=None):
     last = None
+    headers = dict(HEADERS)
+    if extra_headers:
+        headers.update(extra_headers)
     for _ in range(RETRY):
         try:
-            r = requests.get(
-                url, headers=HEADERS, timeout=REQUEST_TIMEOUT,
+            r = _session.get(
+                url, headers=headers, timeout=REQUEST_TIMEOUT,
                 proxies=_proxies(), allow_redirects=True, cookies=cookies,
             )
             r.raise_for_status()
@@ -169,6 +221,26 @@ def _extract_actress(soup):
             if not name or len(name) >= 40:
                 continue
             # 转成简体中文名（查映射表 + 繁简替换）
+            name = to_chinese(name)
+            if name and name not in names:
+                names.append(name)
+        if names:
+            break
+    if names:
+        return names
+
+    # JavDB 详情页兜底：演员在 panel-block 的「演員/出演者」标签后
+    for block in soup.select(".panel-block"):
+        label = block.select_one(".meta-label")
+        if not label:
+            continue
+        label_text = label.get_text(strip=True)
+        if "演員" not in label_text and "出演者" not in label_text:
+            continue
+        for a in block.select('a[href*="/actors/"]'):
+            name = _text(a)
+            if not name or len(name) >= 40:
+                continue
             name = to_chinese(name)
             if name and name not in names:
                 names.append(name)
@@ -241,19 +313,42 @@ def _parse_detail(html, code, base):
 
 
 def fetch_javbus(code):
-    url = f"{JAVBUS_BASE}/{code}"
-    r = _get(url)
+    # 带上站内 Referer，部分 CDN/WAF 会校验来源
+    r = _get(f"{JAVBUS_BASE}/{code}", extra_headers={"Referer": JAVBUS_BASE + "/"})
     return _parse_detail(r.text, code, JAVBUS_BASE)
+
+
+def _javdb_cookies():
+    """把配置里的 Cookie 字符串解析成 dict；未配置返回 None。"""
+    s = (JAVDB_COOKIES or "").strip()
+    if not s:
+        return None
+    out = {}
+    for part in s.split(";"):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            if k.strip():
+                out[k.strip()] = v.strip()
+    return out or None
 
 
 def fetch_javdb(code):
     """JavDB 详情地址是站内 ID，先搜索定位第一命中项。
 
     带 locale=zh-CN 请求中文版，演员名/标题优先返回中文（avdb 项目的做法）。
+    JavDB 对搜索加了登录墙：未配置 JAVDB_COOKIES 或 Cookie 失效时明确报错，
+    不当作普通解析失败让用户摸不着头脑。
     """
+    cookies = _javdb_cookies()
     search_url = f"{JAVDB_BASE}/search?q={code}&f=all&locale=zh-CN"
-    r = _get(search_url)
+    r = _get(search_url, cookies=cookies)
     soup = BeautifulSoup(r.text, "lxml")
+    page_title = soup.select_one("title")
+    if page_title and "登入" in page_title.get_text(strip=True):
+        raise RuntimeError(
+            "JavDB 要求登录（在部署环境变量 JAVDB_COOKIES 里填入浏览器复制的 "
+            "JavDB Cookie 后可抓取）"
+        )
     # 优先匹配列表里编号完全一致项，否则取第一个结果
     target = None
     for item in soup.select(".item, .video-item, .result"):
@@ -274,8 +369,61 @@ def fetch_javdb(code):
         target = JAVDB_BASE + target
     # 详情页也请求中文版（保留已有 query 参数）
     target = target + ("&" if "?" in target else "?") + "locale=zh-CN"
-    detail = _get(target)
+    detail = _get(target, cookies=cookies)
     return _parse_detail(detail.text, code, JAVDB_BASE)
+
+
+def _missav_label_value(soup, label):
+    """MissAV 详情页按元数据标签（發行日期/番號/標題/女優）取标签后的文本。"""
+    for node in soup.find_all(string=re.compile(r"^" + re.escape(label) + r"\s*[:：]")):
+        parent = node.parent
+        if parent is None:
+            continue
+        text = parent.get_text(" ", strip=True)
+        value = re.sub(r"^" + re.escape(label) + r"\s*[:：]\s*", "", text).strip()
+        if value:
+            return value
+    return ""
+
+
+def fetch_missav(code):
+    """MissAV 详情页（https://missav123.com/<小写番号>）。
+
+    元数据区有 番號/標題/女優/發行日期 标签，比通用选择器可靠；
+    h1 常是机翻标题，优先用「標題」字段里的原始日文标题。
+    Cloudflare 挑战页以 curl_cffi 浏览器指纹请求，仍被拦时明确报错。
+    """
+    path = re.sub(r"[^a-z0-9]+", "-", (code or "").lower()).strip("-")
+    r = _impersonate_get(f"{MISSAV_BASE}/{path}")
+    soup = BeautifulSoup(r.text, "lxml")
+    t = soup.select_one("title")
+    if t and "just a moment" in t.get_text(strip=True).lower():
+        raise RuntimeError(
+            "MissAV 有 Cloudflare 人机验证（当前出口 IP 被拦，无法直连抓取）"
+        )
+    hn = _missav_label_value(soup, "番號")
+    if hn and hn.split()[0].upper() != code.strip().upper():
+        raise RuntimeError(f"MissAV 返回的番号不符（{hn}）")
+
+    title = _missav_label_value(soup, "標題") or _extract_title(soup, code)
+    if title:
+        title = re.sub(r"^\s*" + re.escape(code) + r"\s*", "", title, flags=re.I).strip()
+
+    actress = []
+    for a in soup.select('a[href*="/actresses/"]'):
+        raw = _text(a)
+        if not raw or len(raw) >= 40:
+            continue
+        name = to_chinese(raw.split("(")[0].strip())
+        if name and name not in actress:
+            actress.append(name)
+
+    return {
+        "title": title,
+        "actress": actress,
+        "release_date": _extract_date(soup),
+        "cover_url": _extract_cover_url(soup, MISSAV_BASE),
+    }
 
 
 def fetch_avbase(code):
@@ -320,7 +468,8 @@ def _strip_code_suffix(code):
 
 
 def _dmm_cids(code):
-    """按番号推断 DMM CID：DLDSS-584 -> dldss00584 / dldss584。"""
+    """按番号推断 DMM CID：DLDSS-584 -> dldss00584 / dldss584，
+    部分厂牌的 CID 带 h_086 之类厂家前缀，一并尝试。"""
     c = _strip_code_suffix(code)
     if c.startswith("FC2PPV") or c.startswith("FC2"):
         return []
@@ -328,27 +477,31 @@ def _dmm_cids(code):
     if not m:
         return [c.lower()]
     prefix, num = m.groups()
-    if prefix.upper() in ("FC2PPV", "FC2"):
-        return []
     num = num.lstrip("0") or "0"
-    return [prefix.lower() + num.zfill(5), prefix.lower() + num]
+    base = [prefix.lower() + num.zfill(5), prefix.lower() + num]
+    prefixed = ["h_086" + b for b in base]
+    return prefixed + base
 
 
 def fetch_dmm(code):
-    """DMM 直连详情页；地区拦截或编号不存在时返回错误，不影响其他站。"""
+    """DMM 直连详情页；地区拦截时快速失败，不影响其他站。"""
     errors = []
     for cid in _dmm_cids(code):
         for service in ("digital/videoa", "mono/video"):
             url = f"{DMM_BASE}/{service}/-/detail/=/cid={cid}/"
             try:
                 r = _get(url, cookies={"age_check_done": "1"})
-                if "not-available-in-your-region" in r.url:
-                    errors.append(f"{cid}: 地区不可访问")
-                    continue
+                # DMM 地区封锁会 302 到 not-available-in-your-region，再试也是白费
+                if "not-available-in-your-region" in r.url or "not-available-in-your-region" in r.text:
+                    raise RuntimeError("地区不可访问（DMM 封锁当前 IP，跳过）")
                 data = _parse_detail(r.text, code, DMM_BASE)
                 if data.get("title") or data.get("actress") or data.get("release_date") or data.get("cover_url"):
                     return data
                 errors.append(f"{cid}: 页面无有效字段")
+            except RuntimeError as exc:
+                if "地区不可访问" in str(exc):
+                    raise
+                errors.append(f"{cid}: {exc}")
             except Exception as exc:  # noqa: BLE001
                 errors.append(f"{cid}: {exc}")
     raise RuntimeError(" / ".join(errors) or "DMM 未找到有效数据")
@@ -388,7 +541,7 @@ def _merge(results):
         chinese = [n for n in names if _is_chinese_name(n)]
         return chinese or names
 
-    for site in ("javdb", "avbase", "dmm", "javbus"):
+    for site in ("javdb", "missav", "avbase", "dmm", "javbus"):
         names = [to_chinese(a) for a in by_site.get(site, {}).get("actress", [])]
         if names:
             merged["actress"] = preferred_names(names)
@@ -401,9 +554,9 @@ def _merge(results):
                 return value
         return ""
 
-    merged["title"] = first("title", ("javdb", "avbase", "dmm", "javbus"))
-    merged["release_date"] = first("release_date", ("avbase", "javdb", "dmm", "javbus"))
-    merged["cover_url"] = first("cover_url", ("javdb", "javbus", "avbase", "dmm"))
+    merged["title"] = first("title", ("javdb", "missav", "avbase", "dmm", "javbus"))
+    merged["release_date"] = first("release_date", ("avbase", "javdb", "missav", "dmm", "javbus"))
+    merged["cover_url"] = first("cover_url", ("javdb", "missav", "javbus", "avbase", "dmm"))
     return merged
 
 
@@ -438,10 +591,12 @@ def download_cover(url, code):
         referers.append(JAVDB_BASE + "/")
     if "javbus" in url:
         referers.append(JAVBUS_BASE + "/")
+    if "fourhoi" in url or "missav" in url:
+        referers.append(MISSAV_BASE + "/")
     if "pics.dmm" in url or "dmm.co" in url or "avbase" in url:
         referers.append(DMM_BASE + "/")
-    # 兜底：两个站都试
-    for ref in (JAVBUS_BASE + "/", JAVDB_BASE + "/"):
+    # 兜底：几个站都试
+    for ref in (JAVBUS_BASE + "/", MISSAV_BASE + "/", JAVDB_BASE + "/"):
         if ref not in referers:
             referers.append(ref)
 
@@ -450,7 +605,7 @@ def download_cover(url, code):
         headers = dict(HEADERS)
         headers["Referer"] = referer
         try:
-            r = requests.get(
+            r = _session.get(
                 url, headers=headers, timeout=REQUEST_TIMEOUT,
                 proxies=_proxies(), stream=True,
             )
@@ -489,12 +644,13 @@ def scrape(code):
         except Exception as exc:  # noqa: BLE001
             return site, None, str(exc)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
         f1 = ex.submit(run, "javbus", fetch_javbus)
         f2 = ex.submit(run, "javdb", fetch_javdb)
         f3 = ex.submit(run, "avbase", fetch_avbase)
         f4 = ex.submit(run, "dmm", fetch_dmm)
-        results = [f1.result(), f2.result(), f3.result(), f4.result()]
+        f5 = ex.submit(run, "missav", fetch_missav)
+        results = [f1.result(), f2.result(), f3.result(), f4.result(), f5.result()]
 
     merged = _merge(results)
     cover_path, cover_err = download_cover(merged["cover_url"], code)

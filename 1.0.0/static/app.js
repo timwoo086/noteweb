@@ -174,7 +174,6 @@ function renderMovies(movies) {
         <div class="card-actress">${actressLinks || '&nbsp;'}</div>
         <div class="card-dates">
           <span>发行 <b>${escapeHtml(m.release_date) || '-'}</b></span>
-          <span>录入 <b>${escapeHtml(m.added_at) || '-'}</b></span>
         </div>
         <div class="card-foot">
           <button class="copy-btn" data-copy="${m.id}" data-url="${escapeHtml(m.download_url)}">复制</button>
@@ -256,6 +255,9 @@ function updateSelectUI() {
   const all = document.querySelectorAll('.movie-check');
   $('selectCount').textContent = `已选 ${checked.length} 部`;
   $('batchCopyBtn').disabled = checked.length === 0;
+  // 一键删除（仅管理员渲染了该按钮）：有勾选才可用
+  const delBtn = $('batchDeleteBtn');
+  if (delBtn) delBtn.disabled = checked.length === 0;
   // 全选复选框状态：全选 / 部分选 / 未选
   const selAll = $('selectAll');
   selAll.checked = all.length > 0 && checked.length === all.length;
@@ -292,6 +294,23 @@ function bindSelectAll() {
     await writeClipboard(urls.join('\n'));
     toast(`已复制 ${urls.length} 个下载地址`);
   });
+  // 一键删除（仅管理员可见）：逐条删除勾选的影片（含封面）
+  const delBtn = $('batchDeleteBtn');
+  if (delBtn) {
+    delBtn.addEventListener('click', async () => {
+      const ids = selectedMovies().map(c => c.dataset.id);
+      if (!ids.length) return;
+      if (!confirm(`确定删除选中的 ${ids.length} 部影片吗？封面也会一并删除，不可恢复。`)) return;
+      delBtn.disabled = true;
+      let ok = 0, fail = 0;
+      for (const id of ids) {
+        const res = await api('/api/movies/' + id, {method: 'DELETE'});
+        if (res && res.ok) ok++; else fail++;
+      }
+      toast(fail ? `已删除 ${ok} 部，${fail} 部失败` : `已删除 ${ok} 部影片`);
+      loadMovies();
+    });
+  }
 }
 
 // ---------- 弹窗 ----------
@@ -607,6 +626,41 @@ async function openAliasModal() {
   }));
   renderAliasGroups();
   $('aliasModal').hidden = false;
+  loadRenameOptions();
+}
+
+// 统一改名：下拉列出库里的演员名
+async function loadRenameOptions() {
+  const sel = $('renameFrom');
+  const current = sel.value;
+  const res = await api('/api/actresses');
+  sel.innerHTML = '<option value="">选择要改名的演员</option>';
+  (res?.actresses || []).forEach(name => {
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+  });
+  if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
+}
+
+async function renameActress() {
+  const from = $('renameFrom').value.trim();
+  const to = $('renameTo').value.trim();
+  if (!from) { toast('请选择要改名的演员'); return; }
+  if (!to) { toast('请填写新名字'); return; }
+  if (from === to) { toast('新旧名字相同'); return; }
+  if (!confirm(`确定把所有影片里的「${from}」统一改成「${to}」吗？`)) return;
+  const res = await api('/api/actresses/rename', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({from, to})
+  });
+  if (!res || !res.ok) { toast(res?.error || '改名失败'); return; }
+  toast(`已把「${from}」改为「${to}」，共更新 ${res.changed} 部影片`);
+  $('renameTo').value = '';
+  $('renameFrom').value = '';
+  await loadActresses();
+  await loadMovies();
+  loadRenameOptions();
 }
 
 function closeAliasModal() { $('aliasModal').hidden = true; }
@@ -624,12 +678,66 @@ async function saveAliases() {
   await loadMovies();
 }
 
-// ---------- 管理员创建账号 ----------
-function openUserModal() {
+// ---------- 账号管理（查看全部账号 / 改密码 / 创建账号） ----------
+async function loadUserList() {
+  const box = $('userList');
+  const res = await api('/api/users');
+  if (!res || !res.ok) { box.innerHTML = '<div class="alias-empty">账号列表加载失败</div>'; return; }
+  box.innerHTML = '';
+  res.users.forEach(u => {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    const name = document.createElement('span');
+    name.className = 'user-row-name';
+    name.textContent = u.username;
+    row.appendChild(name);
+    if (u.is_admin) {
+      const badge = document.createElement('span');
+      badge.className = 'admin-badge';
+      badge.textContent = '管理员';
+      row.appendChild(badge);
+    }
+    if (u.username === document.body.dataset.username) {
+      const badge = document.createElement('span');
+      badge.className = 'user-row-self';
+      badge.textContent = '（当前登录）';
+      row.appendChild(badge);
+    }
+    const pass = document.createElement('input');
+    pass.type = 'password';
+    pass.className = 'user-row-pass';
+    pass.placeholder = '输入新密码（至少 4 位）';
+    pass.autocomplete = 'new-password';
+    row.appendChild(pass);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-ghost user-row-save';
+    btn.textContent = '改密码';
+    btn.addEventListener('click', async () => {
+      const pwd = pass.value;
+      if (!pwd || pwd.length < 4) { toast('密码至少 4 位'); return; }
+      btn.disabled = true;
+      const res2 = await api('/api/users/' + encodeURIComponent(u.username), {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: pwd})
+      });
+      btn.disabled = false;
+      if (!res2 || !res2.ok) { toast(res2?.error || '修改失败'); return; }
+      pass.value = '';
+      toast(`账号 ${u.username} 的密码已更新`);
+    });
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
+}
+
+async function openUserModal() {
   $('uName').value = '';
   $('uPass').value = '';
+  $('userList').innerHTML = '<div class="alias-empty">加载中…</div>';
   $('userModal').hidden = false;
   setTimeout(() => $('uName').focus(), 50);
+  loadUserList();
 }
 
 function closeUserModal() { $('userModal').hidden = true; }
@@ -644,7 +752,9 @@ async function createUser() {
   });
   if (!res || !res.ok) { toast(res?.error || '创建失败'); return; }
   toast(`账号 ${res.user.username} 已创建`);
-  closeUserModal();
+  $('uName').value = '';
+  $('uPass').value = '';
+  loadUserList();
 }
 
 // ---------- 事件绑定 ----------
@@ -681,6 +791,7 @@ function bind() {
       if (inputs.length) inputs[0].focus();
     });
     $('saveAliasBtn').addEventListener('click', saveAliases);
+    $('renameBtn').addEventListener('click', renameActress);
     document.querySelectorAll('[data-alias-close]').forEach(el => el.addEventListener('click', closeAliasModal));
   }
   document.addEventListener('keydown', e => {

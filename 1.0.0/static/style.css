@@ -329,3 +329,31 @@ a.card-title.detail-link:hover { color: var(--primary); }
   .grid { padding: 0 12px 30px; }
   .form-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------- 账号管理 ---------- */
+.user-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.user-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px; background: var(--card-bg, #fafafa);
+}
+.user-row-name { font-weight: 600; min-width: 90px; word-break: break-all; }
+.user-row-self { color: #888; font-size: 12px; }
+.user-row-pass {
+  flex: 1; min-width: 0; padding: 6px 8px;
+  border: 1px solid var(--border, #ddd); border-radius: 6px;
+}
+.user-row-save { flex-shrink: 0; }
+.user-create-title { font-weight: 600; margin: 4px 0 8px; }
+
+/* ---------- 演员·统一改名 ---------- */
+.rename-box { margin-bottom: 14px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card-bg, #fafafa); }
+.rename-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.rename-row select, .rename-row input {
+  height: 34px; padding: 0 8px; border: 1px solid var(--border);
+  border-radius: 6px; outline: none; min-width: 0;
+}
+.rename-row select { flex: 1.2; }
+.rename-row input { flex: 1; }
+.rename-arrow { color: var(--muted); flex-shrink: 0; }
+.rename-row .btn-primary { flex-shrink: 0; height: 34px; }

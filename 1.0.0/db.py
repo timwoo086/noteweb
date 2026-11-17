@@ -327,6 +327,68 @@ def create_user(username, password, is_admin=False):
     return get_user(username)
 
 
+def list_users():
+    """管理员查看全部账号（不含密码哈希）。"""
+    conn = connect()
+    rows = conn.execute("SELECT * FROM users ORDER BY is_admin DESC, username").fetchall()
+    conn.close()
+    return [_user_to_dict(r) for r in rows]
+
+
+def update_user_password(username, password):
+    """管理员重置任意账号的登录密码。"""
+    username = str(username or "").strip()
+    password = str(password or "")
+    if not get_user(username):
+        raise ValueError(f"账号 {username} 不存在")
+    if len(password) < 4:
+        raise ValueError("密码至少 4 位")
+    conn = connect()
+    conn.execute(
+        "UPDATE users SET password_hash=?, updated_at=? WHERE username=?",
+        (generate_password_hash(password), datetime.now().strftime("%Y-%m-%d %H:%M:%S"), username),
+    )
+    conn.commit()
+    conn.close()
+    return get_user(username)
+
+
+def rename_actress(old_name, new_name):
+    """把所有影片演员列表里的 old_name 统一改成 new_name（去重），返回修改的影片数。"""
+    old_name = str(old_name or "").strip()
+    new_name = str(new_name or "").strip()
+    if not old_name:
+        raise ValueError("要改的名字不能为空")
+    if not new_name:
+        raise ValueError("新名字不能为空")
+    if old_name == new_name:
+        raise ValueError("新旧名字相同")
+    conn = connect()
+    rows = conn.execute("SELECT id, actress FROM movies").fetchall()
+    changed = 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for row in rows:
+        try:
+            names = json.loads(row["actress"] or "[]")
+        except (ValueError, TypeError):
+            continue
+        if old_name not in names:
+            continue
+        new_names = []
+        for n in names:
+            n2 = new_name if n == old_name else n
+            if n2 not in new_names:
+                new_names.append(n2)
+        conn.execute(
+            "UPDATE movies SET actress=?, updated_at=? WHERE id=?",
+            (json.dumps(new_names, ensure_ascii=False), now, row["id"]),
+        )
+        changed += 1
+    conn.commit()
+    conn.close()
+    return changed
+
+
 def set_last_position(username, date_key, movie_id=0):
     """记住某账号最近操作的日期分组，用于首页红字「上次到这里」。"""
     date_key = str(date_key or "").strip()[:50]

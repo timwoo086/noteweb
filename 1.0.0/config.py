@@ -22,4 +22,8 @@ RETRY = int(os.environ.get("RETRY", "2"))
 # 目标机器可直连两个站点，保持 "" 即可。
 HTTP_PROXY = os.environ.get("HTTP_PROXY", "")
 
+# JavDB 登录 Cookie（可选）：JavDB 对搜索加了登录墙，把浏览器里复制的 Cookie
+# 整串贴进来（如 "remember_id=xx; remember_token=yy; ..."）即可免登录抓取。
+JAVDB_COOKIES = os.environ.get("JAVDB_COOKIES", "")
+
 os.makedirs(COVER_DIR, exist_ok=True)

@@ -20,12 +20,82 @@ db.init_db()
 # 详情页封面压缩尺寸与静态资源版本号（模板用 ?v= 做缓存刷新）
 DETAIL_COVER_MAX_WIDTH = 640
 DETAIL_COVER_QUALITY = 82
+THUMB_MAX_SIZE = (480, 480)   # 卡片缩略图最大边框，竖版封面等比缩放
+THUMB_QUALITY = 75
 _detail_cover_locks = defaultdict(threading.Lock)
+_thumb_locks = defaultdict(threading.Lock)
 STATIC_DIR = os.path.join(config.BASE_DIR, "static")
 ASSET_VERSION = str(int(max(
     os.path.getmtime(os.path.join(STATIC_DIR, name))
     for name in ("style.css", "app.js", "detail.js")
 )))
+
+
+def ensure_thumb(filename):
+    """把封面原图生成持久化缩略图（covers/thumbs/<名>.jpg）；已存在或无法处理返回 False。
+
+    首次访问某卡片时按需生成一次，之后浏览器与磁盘双层缓存，列表页首屏大幅提速。
+    """
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+        return False
+    src = os.path.join(config.COVER_DIR, filename)
+    if not os.path.isfile(src):
+        return False
+    thumb_dir = os.path.join(config.COVER_DIR, "thumbs")
+    os.makedirs(thumb_dir, exist_ok=True)
+    out_name = os.path.splitext(os.path.basename(filename))[0] + ".jpg"
+    out = os.path.join(thumb_dir, out_name)
+
+    def fresh():
+        return os.path.isfile(out) and os.path.getmtime(out) >= os.path.getmtime(src)
+
+    try:
+        if fresh():
+            return True
+        with _thumb_locks[out_name]:
+            if fresh():
+                return True
+            from PIL import Image
+            tmp = out + ".tmp"
+            with Image.open(src) as im:
+                im = im.convert("RGB")
+                im.thumbnail(THUMB_MAX_SIZE, Image.LANCZOS)
+                im.save(tmp, "JPEG", quality=THUMB_QUALITY, optimize=True, progressive=True)
+            # 原子替换：多 worker 并发生成同一缩略图也不会写坏文件
+            os.replace(tmp, out)
+        return os.path.isfile(out)
+    except Exception:
+        return False
+
+
+def backfill_thumbs():
+    """启动后台补齐存量封面的缩略图，不阻塞服务。"""
+    import time as _time
+
+    def _worker():
+        try:
+            for name in sorted(os.listdir(config.COVER_DIR)):
+                path = os.path.join(config.COVER_DIR, name)
+                if not os.path.isfile(path):
+                    continue
+                ext = os.path.splitext(name)[1].lower()
+                if ext not in (".jpg", ".jpeg", ".png", ".webp"):
+                    continue
+                try:
+                    if not ensure_thumb(name):
+                        # 原图可能损坏，跳过并稍作停顿避免狂刷
+                        _time.sleep(0.05)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+# gunicorn 直接 import app:app，不执行 __main__；在导入时启动补齐（多 worker 各跑一份，幂等无害）
+backfill_thumbs()
 
 
 @app.context_processor
@@ -184,6 +254,19 @@ def api_actress_candidates():
     })
 
 
+@app.route("/api/actresses/rename", methods=["POST"])
+@login_required
+@admin_required
+def api_rename_actress():
+    """管理员：把所有影片里的旧演员名统一替换成新名字。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        changed = db.rename_actress(data.get("from", ""), data.get("to", ""))
+        return jsonify({"ok": True, "changed": changed})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
 @app.route("/api/movies", methods=["POST"])
 @login_required
 @admin_required
@@ -232,14 +315,29 @@ def movie_detail(movie_id):
     return render_template("detail.html", movie=movie, is_admin=user["is_admin"])
 
 
-@app.route("/api/users", methods=["POST"])
+@app.route("/api/users", methods=["GET", "POST"])
 @login_required
 @admin_required
-def api_create_user():
-    """管理员创建账号。"""
+def api_users():
+    """管理员：查看全部账号 / 创建账号。"""
+    if request.method == "GET":
+        return jsonify({"ok": True, "users": db.list_users()})
     data = request.get_json(silent=True) or {}
     try:
         user = db.create_user(data.get("username", ""), data.get("password", ""))
+        return jsonify({"ok": True, "user": user})
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+
+@app.route("/api/users/<username>", methods=["PUT"])
+@login_required
+@admin_required
+def api_update_user(username):
+    """管理员：重置任意账号的登录密码。"""
+    data = request.get_json(silent=True) or {}
+    try:
+        user = db.update_user_password(username, data.get("password", ""))
         return jsonify({"ok": True, "user": user})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
@@ -302,7 +400,9 @@ def cover(filename):
 @app.route("/thumbs/<path:filename>")
 @login_required
 def thumb(filename):
-    """卡片用缩略图；旧数据没有缩略图时回退到原图，不影响显示。"""
+    """卡片用缩略图：缺失时按需从原图生成并持久化，之后直接命中磁盘缓存；
+    原图缺失或无法处理时回退原图，不影响显示。"""
+    ensure_thumb(filename)
     name = os.path.splitext(filename)[0] + ".jpg"
     thumb_dir = os.path.join(config.COVER_DIR, "thumbs")
     if os.path.isfile(os.path.join(thumb_dir, name)):
