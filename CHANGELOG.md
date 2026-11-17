@@ -4,6 +4,15 @@
 
 ---
 
+## v0.0.22 — 新增 AVBase 与 DMM 刮削源
+
+**提交**：`34e10f6`
+
+- 新增 `https://www.avbase.net/works/<编号>` 聚合源；JavDB/JavBus 拿不到标题、演员时用它兜底，DLDSS-584 这类站点 404 / 信息缺失的编号可直接刮到。
+- 新增 `https://www.dmm.co.jp` 直连源；按番号推断 `dldss00584 / dldss584` 这类 CID，并带年龄确认 Cookie，作为标题、演员、封面兜底。
+- 四站并行抓取；标题/演员优先 JavDB，发行日期优先 AVBase，封面优先 JavDB/JavBus，其他成功站点继续补缺。
+- DMM/AVBase 图片下载按来源站补 Referer；DMM 图片 URL 优先带 `Referer: https://www.dmm.co.jp/`。
+
 ## v0.0.21 — 详情页加载优化：封面压缩、预加载与缓存
 
 **提交**：`0343e39`
