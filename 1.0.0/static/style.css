@@ -123,6 +123,7 @@ button { cursor: pointer; }
 .tag-bluray { background: #1a9bb8; }
 .tag-remux { background: var(--amber); }
 .tag-fps { background: #6b5bd2; }
+.tag-note { background: #5a6472; }
 .card-body { padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 7px; flex: 1; }
 .card-title {
   font-size: 13px; line-height: 1.45; min-height: 38px;
@@ -144,6 +145,8 @@ button { cursor: pointer; }
 .copy-btn.copied { background: var(--green); color: #fff; border-color: var(--green); }
 .edit-btn { width: 34px; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--muted); }
 .edit-btn:hover { color: var(--primary); border-color: #bcd0f7; }
+.card-del-btn { width: 34px; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: #b9bec6; font-size: 15px; }
+.card-del-btn:hover { color: var(--red); border-color: #f3bcbc; background: #fff5f5; }
 .select-btn {
   display: flex; align-items: center; justify-content: center;
   width: 34px; height: 32px; border: 1px solid var(--border);

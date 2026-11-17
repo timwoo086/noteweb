@@ -142,6 +142,9 @@ function renderMovies(movies) {
     if (m.is_bluray) tags.push(`<span class="tag tag-bluray">蓝光</span>`);
     if (m.is_remux) tags.push(`<span class="tag tag-remux">Remux</span>`);
     if (m.framerate) tags.push(`<span class="tag tag-fps">${escapeHtml(fpsText(m.framerate))}</span>`);
+    // 备注按顿号/逗号分隔，每段显示成一个标签
+    (m.note || '').split(/[、,，]/).map(s => s.trim()).filter(Boolean).forEach(n =>
+      tags.push(`<span class="tag tag-note">${escapeHtml(n)}</span>`));
 
     // 演员名可点击筛选
     const actressLinks = (m.actress || []).map(a =>
@@ -163,6 +166,7 @@ function renderMovies(movies) {
         <div class="card-foot">
           <button class="copy-btn" data-copy="${m.id}" data-url="${escapeHtml(m.download_url)}">复制</button>
           <button class="edit-btn" data-edit="${m.id}" title="编辑">✎</button>
+          <button class="card-del-btn" data-del="${m.id}" title="删除此影片">✕</button>
           <label class="select-btn" title="勾选以多选">
             <input type="checkbox" class="movie-check" data-id="${m.id}" data-url="${escapeHtml(m.download_url)}" data-date="${escapeHtml(dateGroupKey(m))}">
           </label>
@@ -178,6 +182,9 @@ function renderMovies(movies) {
   });
   grid.querySelectorAll('[data-edit]').forEach(btn => {
     btn.addEventListener('click', () => openModal(Number(btn.dataset.edit)));
+  });
+  grid.querySelectorAll('[data-del]').forEach(btn => {
+    btn.addEventListener('click', () => removeMovie(Number(btn.dataset.del)));
   });
   // 点击演员名 → 按该演员（含别名组）筛选
   grid.querySelectorAll('.actress-link').forEach(el => {
