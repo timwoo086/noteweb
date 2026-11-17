@@ -38,10 +38,11 @@
       </div>
 
       <div class="detail-tags">
-        {% if movie.resolution %}<span class="tag tag-res">{{ movie.resolution }}</span>{% endif %}
-        {% if movie.is_original %}<span class="tag tag-original">原档</span>{% endif %}
-        {% if movie.is_remux %}<span class="tag tag-remux">REMUX</span>{% endif %}
-        {% if movie.framerate %}<span class="tag tag-fps">{{ movie.framerate }}</span>{% endif %}
+        {% for r in (movie.resolution or '').split(',') if r.strip() %}<span class="tag tag-res">{{ r.strip() }}</span>{% endfor %}
+        {% if movie.is_original %}<span class="tag tag-original">原盘</span>{% endif %}
+        {% if movie.is_bluray %}<span class="tag tag-bluray">蓝光</span>{% endif %}
+        {% if movie.is_remux %}<span class="tag tag-remux">Remux</span>{% endif %}
+        {% if movie.framerate %}<span class="tag tag-fps">{{ movie.framerate }}{% if 'fps' not in movie.framerate.lower() %}fps{% endif %}</span>{% endif %}
       </div>
 
       <table class="detail-table">
@@ -60,8 +61,9 @@
           <tr><th>录入时间</th><td>{{ movie.added_at or '-' }}</td></tr>
           <tr><th>分辨率</th><td>{{ movie.resolution or '-' }}</td></tr>
           <tr><th>帧率</th><td>{{ movie.framerate or '-' }}</td></tr>
-          <tr><th>原档</th><td>{{ '是' if movie.is_original else '否' }}</td></tr>
-          <tr><th>REMUX</th><td>{{ '是' if movie.is_remux else '否' }}</td></tr>
+          <tr><th>原盘</th><td>{{ '是' if movie.is_original else '否' }}</td></tr>
+          <tr><th>蓝光</th><td>{{ '是' if movie.is_bluray else '否' }}</td></tr>
+          <tr><th>Remux</th><td>{{ '是' if movie.is_remux else '否' }}</td></tr>
           <tr><th>数据来源</th><td>{{ movie.source or '-' }}</td></tr>
           {% if movie.note %}<tr><th>备注</th><td>{{ movie.note }}</td></tr>{% endif %}
         </tbody>
