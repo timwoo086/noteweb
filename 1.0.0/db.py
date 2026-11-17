@@ -72,6 +72,7 @@ def init_db():
             added_at      TEXT NOT NULL DEFAULT '',
             resolution    TEXT NOT NULL DEFAULT '',
             is_original   INTEGER NOT NULL DEFAULT 0,
+            is_bluray     INTEGER NOT NULL DEFAULT 0,
             is_remux      INTEGER NOT NULL DEFAULT 0,
             framerate     TEXT NOT NULL DEFAULT '',
             cover_path    TEXT NOT NULL DEFAULT '',
@@ -88,6 +89,8 @@ def init_db():
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(movies)").fetchall()}
     if "cover_url" not in cols:
         conn.execute("ALTER TABLE movies ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
+    if "is_bluray" not in cols:
+        conn.execute("ALTER TABLE movies ADD COLUMN is_bluray INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     conn.close()
 
@@ -179,6 +182,7 @@ def _normalize(data):
         "added_at": str(data.get("added_at", "")).strip() or now[:10],
         "resolution": str(data.get("resolution", "")).strip(),
         "is_original": 1 if str(data.get("is_original", "0")) in ("1", "true", "on", "True") else 0,
+        "is_bluray": 1 if str(data.get("is_bluray", "0")) in ("1", "true", "on", "True") else 0,
         "is_remux": 1 if str(data.get("is_remux", "0")) in ("1", "true", "on", "True") else 0,
         "framerate": str(data.get("framerate", "")).strip(),
         "cover_path": str(data.get("cover_path", "")).strip(),
@@ -198,9 +202,9 @@ def create_movie(data):
     try:
         conn.execute(
             """INSERT INTO movies
-               (code,title,actress,release_date,added_at,resolution,is_original,is_remux,
+               (code,title,actress,release_date,added_at,resolution,is_original,is_bluray,is_remux,
                 framerate,cover_path,cover_url,download_url,source,note,created_at,updated_at)
-               VALUES (:code,:title,:actress,:release_date,:added_at,:resolution,:is_original,:is_remux,
+               VALUES (:code,:title,:actress,:release_date,:added_at,:resolution,:is_original,:is_bluray,:is_remux,
                 :framerate,:cover_path,:cover_url,:download_url,:source,:note,:now,:now)""",
             d,
         )
@@ -219,7 +223,7 @@ def update_movie(movie_id, data):
     conn.execute(
         """UPDATE movies SET
              code=:code,title=:title,actress=:actress,release_date=:release_date,added_at=:added_at,
-             resolution=:resolution,is_original=:is_original,is_remux=:is_remux,framerate=:framerate,
+             resolution=:resolution,is_original=:is_original,is_bluray=:is_bluray,is_remux=:is_remux,framerate=:framerate,
              cover_path=:cover_path,cover_url=:cover_url,download_url=:download_url,source=:source,
              note=:note,updated_at=:now
            WHERE id=:id""",
