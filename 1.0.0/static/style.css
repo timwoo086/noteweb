@@ -120,6 +120,7 @@ button { cursor: pointer; }
 .tag { font-size: 10px; font-weight: 600; padding: 3px 6px; border-radius: 4px; color: #fff; line-height: 1; }
 .tag-res { background: var(--primary); }
 .tag-original { background: var(--green); }
+.tag-bluray { background: #1a9bb8; }
 .tag-remux { background: var(--amber); }
 .tag-fps { background: #6b5bd2; }
 .card-body { padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 7px; flex: 1; }
@@ -183,6 +184,12 @@ button { cursor: pointer; }
 }
 .form-item input:focus, .form-item select:focus { border-color: var(--primary); }
 .form-item.check-item label { display: flex; align-items: center; gap: 6px; color: var(--text); font-size: 14px; padding-bottom: 8px; }
+.check-row { display: flex; gap: 16px; height: 36px; align-items: center; }
+.check-row label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.check-row input { accent-color: var(--primary); }
+.fps-input { display: flex; align-items: center; gap: 8px; }
+.fps-input input { flex: 1; min-width: 0; }
+.fps-input span { color: var(--muted); font-size: 13px; }
 .modal-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--border); }
 .modal-foot .btn-danger { margin-right: auto; }
 
