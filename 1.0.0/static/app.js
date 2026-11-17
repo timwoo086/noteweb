@@ -70,6 +70,13 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// 帧率保存纯数字，显示时统一补 fps 后缀（兼容旧数据里已带 fps 的值）
+function fpsText(value) {
+  const v = String(value || '').trim();
+  if (!v) return '';
+  return /fps$/i.test(v) ? v : v + 'fps';
+}
+
 function dateGroupKey(m) {
   const value = (m[currentDateField] || '').slice(0, 10);
   return value || '未标注日期';
@@ -129,10 +136,12 @@ function renderMovies(movies) {
         : `<div class="cover-placeholder">暂无封面</div>`;
 
     const tags = [];
-    if (m.resolution) tags.push(`<span class="tag tag-res">${escapeHtml(m.resolution)}</span>`);
-    if (m.is_original) tags.push(`<span class="tag tag-original">原档</span>`);
-    if (m.is_remux) tags.push(`<span class="tag tag-remux">REMUX</span>`);
-    if (m.framerate) tags.push(`<span class="tag tag-fps">${escapeHtml(m.framerate)}</span>`);
+    (m.resolution || '').split(/[,，/]/).map(s => s.trim()).filter(Boolean).forEach(r =>
+      tags.push(`<span class="tag tag-res">${escapeHtml(r)}</span>`));
+    if (m.is_original) tags.push(`<span class="tag tag-original">原盘</span>`);
+    if (m.is_bluray) tags.push(`<span class="tag tag-bluray">蓝光</span>`);
+    if (m.is_remux) tags.push(`<span class="tag tag-remux">Remux</span>`);
+    if (m.framerate) tags.push(`<span class="tag tag-fps">${escapeHtml(fpsText(m.framerate))}</span>`);
 
     // 演员名可点击筛选
     const actressLinks = (m.actress || []).map(a =>
@@ -273,8 +282,11 @@ function openModal(id = null) {
   $('modalTitle').textContent = id ? '编辑影片' : '录入影片';
   $('fetchStatus').hidden = true;
   $('preview').hidden = true;
-  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fResolution','fFramerate','fDownload','fNote'].forEach(i => $(i).value = '');
+  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fFramerate','fDownload','fNote'].forEach(i => $(i).value = '');
+  $('fRes4K').checked = false;
+  $('fRes1080').checked = false;
   $('fOriginal').checked = false;
+  $('fBluray').checked = false;
   $('fRemux').checked = false;
   $('deleteBtn').hidden = !id;
   actressOptions = [];
@@ -290,9 +302,12 @@ function openModal(id = null) {
       $('fActress').value = (m.actress || []).join(', ');
       $('fRelease').value = m.release_date || '';
       $('fAdded').value = m.added_at || '';
-      $('fResolution').value = m.resolution || '';
-      $('fFramerate').value = m.framerate || '';
+      const resText = (m.resolution || '').toUpperCase();
+      $('fRes4K').checked = resText.includes('4K');
+      $('fRes1080').checked = resText.includes('1080');
+      $('fFramerate').value = String(m.framerate || '').replace(/fps$/i, '').trim();
       $('fOriginal').checked = !!m.is_original;
+      $('fBluray').checked = !!m.is_bluray;
       $('fRemux').checked = !!m.is_remux;
       $('fDownload').value = m.download_url || '';
       $('fNote').value = m.note || '';
@@ -431,9 +446,10 @@ async function saveMovie() {
     actress: $('fActress').value.trim(),
     release_date: $('fRelease').value,
     added_at: $('fAdded').value,
-    resolution: $('fResolution').value,
-    framerate: $('fFramerate').value,
+    resolution: [$('fRes4K').checked ? '4K' : '', $('fRes1080').checked ? '1080P' : ''].filter(Boolean).join(','),
+    framerate: $('fFramerate').value.trim().replace(/fps$/i, '').trim(),
     is_original: $('fOriginal').checked ? 1 : 0,
+    is_bluray: $('fBluray').checked ? 1 : 0,
     is_remux: $('fRemux').checked ? 1 : 0,
     download_url: $('fDownload').value.trim(),
     note: $('fNote').value.trim(),
