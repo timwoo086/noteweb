@@ -1,11 +1,13 @@
-"""双站抓取解析器。
+"""多站抓取解析器。
 
-JavBus: 编号直达详情页 https://www.javbus.com/<CODE>
-JavDB : 先搜索 https://javdb.com/search?q=<CODE>&f=all 命中后进入详情页
+JavBus : 编号直达详情页 https://www.javbus.com/<CODE>
+JavDB  : 先搜索 https://javdb.com/search?q=<CODE>&f=all 命中后进入详情页
+AVBase : https://www.avbase.net/works/<CODE>，补 JavDB/JavBus 缺标题和演员
+DMM    : https://www.dmm.co.jp/...，按番号推断 CID，作为标题/演员/封面兜底
 
 设计要点：
 1. 选择器集中放在顶部常量列表，站点改版时只改这一处；每个字段配多个候选选择器容错。
-2. 两站并行抓取，结果合并：以先成功者为主，缺失字段用另一站补齐。
+2. 多站并行抓取，结果合并：以先成功者为主，缺失字段用其他站补齐。
 3. 封面下载到本地 data/covers，避免防盗链导致外链失效。
 4. 任何站点失败都不阻断整体流程，返回已抓到的字段 + 错误说明，用户仍可手动补全。
 """
@@ -20,6 +22,8 @@ from config import COVER_DIR, HTTP_PROXY, REQUEST_TIMEOUT, RETRY
 
 JAVBUS_BASE = "https://www.javbus.com"
 JAVDB_BASE = "https://javdb.com"
+AVBASE_BASE = "https://www.avbase.net"
+DMM_BASE = "https://www.dmm.co.jp"
 
 HEADERS = {
     "User-Agent": (
@@ -49,7 +53,15 @@ def _is_chinese_name(name):
 
 # ---------- 选择器表（改版时主要维护这里）----------
 # 标题
-TITLE_SELECTORS = ["h3", "div.info h3", ".container h3", "h1", ".video-info h2", "strong.title"]
+TITLE_SELECTORS = [
+    "h1",
+    "h3",
+    "div.info h3",
+    ".container h3",
+    ".video-info h2",
+    ".page-detail h1",
+    "strong.title",
+]
 # 演员链接
 ACTRESS_SELECTORS = [
     '.info a[href*="/star/"]',
@@ -57,10 +69,20 @@ ACTRESS_SELECTORS = [
     'a[href*="/star/"]',
     '.video-info a[href*="/actors/"]',
     'a[href*="/actor/"]',
+    # DMM 常见演员链接
+    'a[href*="/article/actress/"]',
+    '.info dd a[href*="/article/actress/"]',
+    # AVBase 出演者链接
+    'a[href*="/talents/"]',
 ]
 # 发行日期：JavBus 常见 "发行日期：" 后跟 <a>；JavDB 常见 "日期："
 DATE_LABELS = ["发行日期", "発売日", "日期", "上映日期", "release date", "配信開始日"]
-DATE_SELECTORS = ['.info a[href*="/date/"]', '.info span.genre + a', '.video-info .value']
+DATE_SELECTORS = [
+    '.info a[href*="/date/"]',
+    '.info span.genre + a',
+    '.video-info .value',
+    'a[href*="/works/date/"]',   # AVBase 的発売日链接
+]
 # 封面（顺序即优先级，按站点改版时维护这里）
 COVER_SELECTORS = [
     'a.bigImage img',                       # JavBus 大图链接
@@ -69,7 +91,10 @@ COVER_SELECTORS = [
     '.cover img',
     '.cover-wrap img',
     'img[src*="/pics/"]',                   # JavBus 图片 CDN
+    'img[src*="pl.jpg"]',                   # DMM 大图
+    'img[src*="ps.jpg"]',
     'img[src*="cover"]',
+    'img[src*="awsimgsrc"]',                # AVBase 常用放大图字段
     'meta[property="og:image"]',            # 兜底：社交分享图，通常是高清封面
     'meta[name="twitter:image"]',
 ]
@@ -84,13 +109,13 @@ def _proxies():
     return {"http": None, "https": None}
 
 
-def _get(url):
+def _get(url, cookies=None):
     last = None
     for _ in range(RETRY):
         try:
             r = requests.get(
                 url, headers=HEADERS, timeout=REQUEST_TIMEOUT,
-                proxies=_proxies(), allow_redirects=True,
+                proxies=_proxies(), allow_redirects=True, cookies=cookies,
             )
             r.raise_for_status()
             return r
@@ -253,6 +278,82 @@ def fetch_javdb(code):
     return _parse_detail(detail.text, code, JAVDB_BASE)
 
 
+def fetch_avbase(code):
+    """AVBase 详情页：DMM 聚合数据，JavBus/JavDB 拿不到标题/演员时兜底。"""
+    from urllib.parse import quote
+
+    r = _get(f"{AVBASE_BASE}/works/{quote(code)}")
+    soup = BeautifulSoup(r.text, "lxml")
+    data = _parse_detail(r.text, code, AVBASE_BASE)
+
+    # AVBase 的出演者区块很稳定，选不到通用演员选择器时再按 talents 链接兜底
+    if not data["actress"]:
+        names = []
+        for a in soup.select('a[href*="/talents/"]'):
+            name = _text(a)
+            if not name or len(name) >= 40:
+                continue
+            name = to_chinese(name)
+            if name and name not in names:
+                names.append(name)
+        data["actress"] = names
+
+    # AVBase 通常聚合了 DMM cid；没有 og:image 时用 DMM 规律图兜底
+    if not data["cover_url"]:
+        for cid in _dmm_cids(code):
+            for pattern in ("digital/videoa", "digital/video", "mono/video"):
+                data["cover_url"] = f"https://pics.dmm.co.jp/{pattern}/{cid}/{cid}pl.jpg"
+                break
+            break
+    return data
+
+
+def _strip_code_suffix(code):
+    """去掉 -C/-4K/-REMUX 等版本后缀，用于推断 DMM CID。"""
+    c = (code or "").strip().upper()
+    for _ in range(4):
+        c2 = re.sub(r"-(?:C\d*|CD\d*|4K|2K|1080P|60FPS|REMUX|BLURAY|UHD|U)$", "", c)
+        if c2 == c:
+            break
+        c = c2
+    return c
+
+
+def _dmm_cids(code):
+    """按番号推断 DMM CID：DLDSS-584 -> dldss00584 / dldss584。"""
+    c = _strip_code_suffix(code)
+    if c.startswith("FC2PPV") or c.startswith("FC2"):
+        return []
+    m = re.match(r"^([A-Z]+)-?(\d+)$", c)
+    if not m:
+        return [c.lower()]
+    prefix, num = m.groups()
+    if prefix.upper() in ("FC2PPV", "FC2"):
+        return []
+    num = num.lstrip("0") or "0"
+    return [prefix.lower() + num.zfill(5), prefix.lower() + num]
+
+
+def fetch_dmm(code):
+    """DMM 直连详情页；地区拦截或编号不存在时返回错误，不影响其他站。"""
+    errors = []
+    for cid in _dmm_cids(code):
+        for service in ("digital/videoa", "mono/video"):
+            url = f"{DMM_BASE}/{service}/-/detail/=/cid={cid}/"
+            try:
+                r = _get(url, cookies={"age_check_done": "1"})
+                if "not-available-in-your-region" in r.url:
+                    errors.append(f"{cid}: 地区不可访问")
+                    continue
+                data = _parse_detail(r.text, code, DMM_BASE)
+                if data.get("title") or data.get("actress") or data.get("release_date") or data.get("cover_url"):
+                    return data
+                errors.append(f"{cid}: 页面无有效字段")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{cid}: {exc}")
+    raise RuntimeError(" / ".join(errors) or "DMM 未找到有效数据")
+
+
 def _is_chinese_name(name):
     """名字里含汉字（CJK 统一表意文字）视为中文名，优先级高于假名/罗马字。"""
     return any("\u4e00" <= ch <= "\u9fff" for ch in (name or ""))
@@ -261,37 +362,48 @@ def _is_chinese_name(name):
 def _merge(results):
     """results: [(site, dict|None, err)] -> 合并后的 dict。
 
-    演员名：javdb 用 locale=zh-CN 抓到的中文名优先；两站所有写法都收集到
-    actress_all，前端可据此把多个名字归一到一个中文名。
+    各字段按站点可靠性取值：标题/演员优先 javdb，发行日期优先 avbase，
+    封面优先 javdb/javbus；所有写法都收集到 actress_all 供前端归一。
     """
     merged = {"title": "", "actress": [], "actress_all": [], "release_date": "",
               "cover_url": "", "source": "", "errors": []}
+    by_site = {}
+
     for site, data, err in results:
         if err:
             merged["errors"].append(f"{site}: {err}")
             continue
         if not data:
             continue
-        if not merged["title"] and data.get("title"):
-            merged["title"] = data["title"]
-        # 收集两站所有演员写法
+        by_site[site] = data
+        merged["source"] = (merged["source"] + " " + site).strip()
+        # 收集所有演员写法，前端可据此把多个名字归一到一个中文名
         for a in data.get("actress", []):
             cn = to_chinese(a)
             for v in (cn, a):
                 if v and v not in merged["actress_all"]:
                     merged["actress_all"].append(v)
-        # 优先用中文名；javdb（中文站）优先于 javbus
-        names = [to_chinese(a) for a in data.get("actress", [])]
+
+    def preferred_names(names):
         chinese = [n for n in names if _is_chinese_name(n)]
-        if site == "javdb" and chinese:
-            merged["actress"] = chinese
-        elif not merged["actress"] and names:
-            merged["actress"] = names
-        if not merged["release_date"] and data.get("release_date"):
-            merged["release_date"] = data["release_date"]
-        if not merged["cover_url"] and data.get("cover_url"):
-            merged["cover_url"] = data["cover_url"]
-        merged["source"] = (merged["source"] + " " + site).strip()
+        return chinese or names
+
+    for site in ("javdb", "avbase", "dmm", "javbus"):
+        names = [to_chinese(a) for a in by_site.get(site, {}).get("actress", [])]
+        if names:
+            merged["actress"] = preferred_names(names)
+            break
+
+    def first(key, priorities):
+        for site in priorities:
+            value = by_site.get(site, {}).get(key)
+            if value:
+                return value
+        return ""
+
+    merged["title"] = first("title", ("javdb", "avbase", "dmm", "javbus"))
+    merged["release_date"] = first("release_date", ("avbase", "javdb", "dmm", "javbus"))
+    merged["cover_url"] = first("cover_url", ("javdb", "javbus", "avbase", "dmm"))
     return merged
 
 
@@ -324,8 +436,10 @@ def download_cover(url, code):
     referers = []
     if "javdb" in url:
         referers.append(JAVDB_BASE + "/")
-    if "javbus" in url or "pics.dmm" in url or "dmm.co" in url:
+    if "javbus" in url:
         referers.append(JAVBUS_BASE + "/")
+    if "pics.dmm" in url or "dmm.co" in url or "avbase" in url:
+        referers.append(DMM_BASE + "/")
     # 兜底：两个站都试
     for ref in (JAVBUS_BASE + "/", JAVDB_BASE + "/"):
         if ref not in referers:
@@ -375,10 +489,12 @@ def scrape(code):
         except Exception as exc:  # noqa: BLE001
             return site, None, str(exc)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
         f1 = ex.submit(run, "javbus", fetch_javbus)
         f2 = ex.submit(run, "javdb", fetch_javdb)
-        results = [f1.result(), f2.result()]
+        f3 = ex.submit(run, "avbase", fetch_avbase)
+        f4 = ex.submit(run, "dmm", fetch_dmm)
+        results = [f1.result(), f2.result(), f3.result(), f4.result()]
 
     merged = _merge(results)
     cover_path, cover_err = download_cover(merged["cover_url"], code)
