@@ -172,8 +172,8 @@ def get_by_code(code):
     return _row_to_dict(row)
 
 
-def list_movies(date_field="added_at", date_from="", date_to="", actress="", keyword="", category=""):
-    """按栏目 / 日期区间 / 演员 / 关键字筛选。date_field 仅允许 release_date 或 added_at。"""
+def _movie_where(date_field, date_from, date_to, actress, keyword, category):
+    """构造影片筛选条件，供 list_movies / count_movies 共用。"""
     if date_field not in ("release_date", "added_at"):
         date_field = "added_at"
     clauses, args = [], []
@@ -198,8 +198,30 @@ def list_movies(date_field="added_at", date_from="", date_to="", actress="", key
         args.extend([f"%{keyword}%", f"%{keyword}%"])
 
     where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    return where, args, date_field
+
+
+def count_movies(date_field="added_at", date_from="", date_to="", actress="", keyword="", category=""):
+    """按与 list_movies 相同的条件统计总数（分页用）。"""
+    where, args, _ = _movie_where(date_field, date_from, date_to, actress, keyword, category)
+    conn = connect()
+    n = conn.execute(f"SELECT COUNT(*) FROM movies{where}", args).fetchone()[0]
+    conn.close()
+    return n
+
+
+def list_movies(date_field="added_at", date_from="", date_to="", actress="", keyword="", category="",
+                limit=0, offset=0):
+    """按栏目 / 日期区间 / 演员 / 关键字筛选。date_field 仅允许 release_date 或 added_at。
+
+    limit > 0 时分页返回（配合 offset），limit=0 保持旧行为返回全部（兼容内部脚本）。
+    """
+    where, args, date_field = _movie_where(date_field, date_from, date_to, actress, keyword, category)
     # 始终按当前日期模式倒序，最新日期排最上面；同日按 id 倒序
     sql = f"SELECT * FROM movies{where} ORDER BY {date_field} DESC, id DESC"
+    if limit and limit > 0:
+        sql += " LIMIT ? OFFSET ?"
+        args = args + [limit, max(0, offset)]
     conn = connect()
     rows = conn.execute(sql, args).fetchall()
     conn.close()
