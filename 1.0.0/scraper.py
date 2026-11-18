@@ -17,11 +17,17 @@ import concurrent.futures
 import json
 import os
 import re
+import time
+from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, JAVDB_IDS_PATH, REQUEST_TIMEOUT, RETRY
+from config import (
+    COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, JAVDB_IDS_PATH,
+    REQUEST_TIMEOUT, RETRY,
+    FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, FLARESOLVERR_CACHE_TTL,
+)
 
 JAVBUS_BASE = "https://www.javbus.com"
 JAVDB_BASE = "https://javdb.com"
@@ -138,25 +144,133 @@ _session = requests.Session()
 _session.trust_env = False
 
 
+def _is_cf_challenge(resp):
+    """判断响应是否是 Cloudflare 人机验证 / JS Challenge 页面。"""
+    if resp is None:
+        return False
+    if getattr(resp, "status_code", 0) in (403, 429, 503):
+        text = (getattr(resp, "text", "") or "")[:6000].lower()
+        markers = (
+            "just a moment", "cf-browser-verification", "cf-challenge",
+            "checking your browser", "enable javascript and cookies",
+            "attention required", "cloudflare", "ray id",
+        )
+        if any(m in text for m in markers):
+            return True
+    return False
+
+
+# FlareSolverr 会话与 clearance 缓存：同一域名求解一次后可复用 cookie，避免频繁触发验证
+_fs_session_id = ""
+_fs_clearance = {}   # domain -> {"cookies": [...], "ua": str, "ts": float}
+_fs_lock = __import__("threading").Lock()
+
+
+def _fs_solve(url):
+    """调用 FlareSolverr 求解 Cloudflare 挑战，返回 (html, cookies_dict, user_agent)。
+
+    未配置 FLARESOLVERR_URL 或求解失败时返回 None。
+    """
+    if not FLARESOLVERR_URL:
+        return None
+    global _fs_session_id
+    try:
+        with _fs_lock:
+            if not _fs_session_id:
+                r = requests.post(
+                    FLARESOLVERR_URL + "/v1",
+                    json={"cmd": "sessions.create", "session": "noteweb"},
+                    timeout=20, proxies=_proxies(),
+                )
+                data = r.json() if r.ok else {}
+                # 已存在时直接复用
+                sid = data.get("session") or "noteweb"
+                _fs_session_id = sid
+            payload = {
+                "cmd": "request.get", "url": url,
+                "maxTimeout": FLARESOLVERR_TIMEOUT * 1000,
+                "session": _fs_session_id,
+            }
+        r = requests.post(FLARESOLVERR_URL + "/v1", json=payload,
+                          timeout=FLARESOLVERR_TIMEOUT + 15, proxies=_proxies())
+        if not r.ok:
+            return None
+        data = r.json()
+        if data.get("status") != "ok" or not data.get("solution"):
+            return None
+        sol = data["solution"]
+        cookies = {}
+        for c in sol.get("cookies") or []:
+            if c.get("name"):
+                cookies[c["name"]] = c.get("value", "")
+        return sol.get("response") or "", cookies, sol.get("userAgent") or ""
+    except Exception:
+        # 求解失败不影响原流程，由调用方按原样报错
+        return None
+
+
+def _flaresolverr_get(url, cookies=None):
+    """通过 FlareSolverr 拿页面；命中缓存的 clearance 时直接复用其 cookie。
+
+    返回类 requests.Response 的轻量对象（含 text/status_code/url），供现有解析逻辑使用。
+    """
+    if not FLARESOLVERR_URL:
+        return None
+    domain = (urlparse(url).hostname or "").lower()
+    now = time.time()
+    cached = _fs_clearance.get(domain)
+    use_cookies = dict(cookies or {})
+    ua = None
+    if cached and now - cached["ts"] < FLARESOLVERR_CACHE_TTL:
+        use_cookies.update(cached["cookies"])
+        ua = cached["ua"]
+
+    solved = _fs_solve(url)
+    if solved is None:
+        return None
+    html, fs_cookies, fs_ua = solved
+    if fs_cookies:
+        use_cookies.update(fs_cookies)
+        _fs_clearance[domain] = {"cookies": fs_cookies, "ua": fs_ua, "ts": now}
+
+    class _Resp:
+        def __init__(self, _text, _url):
+            self.status_code = 200
+            self.text = _text
+            self.url = _url
+            self.headers = {}
+
+    return _Resp(html, url)
+
+
 def _impersonate_get(url, cookies=None):
     """带浏览器 TLS 指纹的 GET（curl_cffi），用于有 Cloudflare 的站点。
 
-    curl_cffi 缺失或代理协议不兼容时回退到普通 requests。
+    curl_cffi 缺失或代理协议不兼容时回退到普通 requests；
+    若返回结果仍是 CF 挑战页，且配置了 FlareSolverr，则自动改走 FlareSolverr 求解。
     """
+    resp = None
     if _creq is not None:
         try:
             # 4xx（含 CF 挑战页 403）也返回响应体，由调用方按页面特征给出明确报错
-            return _creq.get(
+            resp = _creq.get(
                 url, impersonate="chrome124", timeout=REQUEST_TIMEOUT,
                 proxies=_proxies() or None, cookies=cookies,
                 allow_redirects=True,
             )
         except ImportError:
-            pass
+            resp = None
         except Exception:
             # 指纹请求失败（如代理协议不兼容）时退回普通 requests 再试一次
-            pass
-    return _get(url, cookies=cookies)
+            resp = None
+    if resp is None:
+        resp = _get(url, cookies=cookies)
+
+    if _is_cf_challenge(resp):
+        fs = _flaresolverr_get(url, cookies=cookies)
+        if fs is not None:
+            return fs
+    return resp
 
 
 def _get(url, cookies=None, extra_headers=None):
@@ -170,10 +284,21 @@ def _get(url, cookies=None, extra_headers=None):
                 url, headers=headers, timeout=REQUEST_TIMEOUT,
                 proxies=_proxies(), allow_redirects=True, cookies=cookies,
             )
+            # CF 挑战页（403/503 等）先不抛，交给下面的 FlareSolverr 判断
+            if _is_cf_challenge(r):
+                fs = _flaresolverr_get(url, cookies=cookies)
+                if fs is not None:
+                    return fs
             r.raise_for_status()
             return r
         except Exception as exc:  # noqa: BLE001 - 站点异常多样，统一兜底
             last = exc
+            # 4xx/5xx 的 HTTPError 里带响应，若正是 CF 挑战页则走 FlareSolverr
+            resp = getattr(exc, "response", None)
+            if _is_cf_challenge(resp):
+                fs = _flaresolverr_get(url, cookies=cookies)
+                if fs is not None:
+                    return fs
     raise last
 
 
