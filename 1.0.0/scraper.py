@@ -422,6 +422,9 @@ def _search_javdb_id(query_code, code=""):
     target_q = norm(code or query_code)
     items = soup.select(".movie-list .item, .item, .video-item, .result")
     exact = fuzzy = None
+    # 顺手缓存本页所有「番号→ID」映射，减少后续搜索次数（JavDB 有频率限制）
+    page_map = {}
+    code_re = re.compile(r"\b([A-Z]{2,6}-\d{3,6}|FC2(?:PPV)?-?\d{5,8})\b", re.I)
     for item in items:
         a = item.select_one('a[href*="/v/"]')
         if not a or not a.get("href"):
@@ -429,10 +432,29 @@ def _search_javdb_id(query_code, code=""):
         href = a["href"]
         text = item.get_text(" ", strip=True)
         title = a.get("title", "")
+        m = re.search(r"/v/([a-zA-Z0-9]{4,12})", href)
+        # 提取该项里的番号（优先标题，其次文本）
+        found = code_re.findall(title) or code_re.findall(text)
+        if m and found:
+            cid = found[0].upper().replace(" ", "")
+            page_map[cid] = m.group(1)
         if exact is None and (target_q and target_q in norm(text) or target_q in norm(title)):
             exact = href
         if fuzzy is None:
             fuzzy = href
+    if page_map:
+        # 批量并入缓存（一次写盘）
+        cache = _load_javdb_ids()
+        cache.update(page_map)
+        try:
+            import tempfile
+            os.makedirs(os.path.dirname(JAVDB_IDS_PATH), exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(JAVDB_IDS_PATH), suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(cache, f, ensure_ascii=False, indent=1)
+            os.replace(tmp, JAVDB_IDS_PATH)
+        except OSError:
+            pass
     return exact or fuzzy or ""
 
 
