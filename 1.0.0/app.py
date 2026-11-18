@@ -193,7 +193,7 @@ def index():
 @app.route("/api/movies")
 @login_required
 def api_movies():
-    movies = db.list_movies(
+    filters = dict(
         date_field=request.args.get("date_field", "added_at"),
         date_from=request.args.get("date_from", ""),
         date_to=request.args.get("date_to", ""),
@@ -201,7 +201,27 @@ def api_movies():
         keyword=request.args.get("keyword", ""),
         category=request.args.get("category", ""),
     )
-    return jsonify({"ok": True, "movies": movies})
+    # 分页：带 page 参数时只返回一页数据（首屏秒开，滚动加载后续页）；
+    # 不带 page 时保持旧行为返回全量，兼容导入/核对等内部脚本。
+    page = request.args.get("page", "")
+    if page != "":
+        try:
+            page = max(1, int(page))
+        except ValueError:
+            page = 1
+        page_size = request.args.get("page_size", "120")
+        try:
+            page_size = min(500, max(1, int(page_size)))
+        except ValueError:
+            page_size = 120
+        total = db.count_movies(**filters)
+        movies = db.list_movies(**filters, limit=page_size, offset=(page - 1) * page_size)
+        return jsonify({
+            "ok": True, "movies": movies, "total": total, "page": page,
+            "page_size": page_size, "has_more": page * page_size < total,
+        })
+    movies = db.list_movies(**filters)
+    return jsonify({"ok": True, "movies": movies, "total": len(movies)})
 
 
 @app.route("/api/actresses")
