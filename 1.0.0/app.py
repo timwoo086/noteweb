@@ -172,6 +172,10 @@ def logout():
 def index():
     user = current_user()
     date_field = request.args.get("date_field", "added_at")
+    # 默认进入 FT.A.V 栏目；只有明确传 category 时才切换（允许空值表示不筛选）
+    category = request.args.get("category", None)
+    if category is None:
+        category = "FT.A.V"
     return render_template(
         "index.html",
         date_field=date_field,
@@ -179,7 +183,7 @@ def index():
         date_to=request.args.get("date_to", ""),
         actress=request.args.get("actress", ""),
         keyword=request.args.get("keyword", ""),
-        category=request.args.get("category", ""),
+        category=category,
         username=user["username"],
         is_admin=user["is_admin"],
         last_date=user["last_date"],
