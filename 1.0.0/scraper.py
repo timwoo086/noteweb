@@ -14,13 +14,14 @@ DMM     : https://www.dmm.co.jp/...，按番号推断 CID，作为标题/演员/
 4. 任何站点失败都不阻断整体流程，返回已抓到的字段 + 错误说明，用户仍可手动补全。
 """
 import concurrent.futures
+import json
 import os
 import re
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, REQUEST_TIMEOUT, RETRY
+from config import COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, JAVDB_IDS_PATH, REQUEST_TIMEOUT, RETRY
 
 JAVBUS_BASE = "https://www.javbus.com"
 JAVDB_BASE = "https://javdb.com"
@@ -332,14 +333,64 @@ def _javdb_cookies():
     return out or None
 
 
-def fetch_javdb(code):
-    """JavDB 详情地址是站内 ID，先搜索定位第一命中项。
+def _load_javdb_ids():
+    """读取番号→详情页ID 缓存（data/javdb_ids.json）。"""
+    try:
+        with open(JAVDB_IDS_PATH, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
-    带 locale=zh-CN 请求中文版，演员名/标题优先返回中文（avdb 项目的做法）。
-    JavDB 对搜索加了登录墙：未配置 JAVDB_COOKIES 或 Cookie 失效时明确报错，
-    不当作普通解析失败让用户摸不着头脑。
+
+def _remember_javdb_id(code, jid):
+    """记住番号对应的 JavDB 详情页 ID，下次直接走详情页绕过搜索墙。"""
+    if not code or not jid:
+        return
+    import tempfile
+    data = _load_javdb_ids()
+    data[code.upper()] = jid
+    try:
+        os.makedirs(os.path.dirname(JAVDB_IDS_PATH), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(JAVDB_IDS_PATH), suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, JAVDB_IDS_PATH)
+    except OSError:
+        pass
+
+
+def fetch_javdb_detail(jid):
+    """直接用 /v/<ID> 抓 JavDB 详情页——详情页无登录墙，机房 IP 也能直连。
+
+    jid 可以是纯 ID（p4aG5）、/v/p4aG5 或完整 URL。
+    """
+    jid = str(jid or "").strip()
+    m = re.search(r"/v/([a-zA-Z0-9]{4,12})", jid)
+    if m:
+        jid = m.group(1)
+    if not re.fullmatch(r"[a-zA-Z0-9]{4,12}", jid):
+        raise RuntimeError("JavDB 详情页 ID 无效")
+    url = f"{JAVDB_BASE}/v/{jid}?locale=zh-CN"
+    r = _get(url, cookies=_javdb_cookies())
+    return _parse_detail(r.text, "", JAVDB_BASE)
+
+
+def fetch_javdb(code):
+    """JavDB 抓取：优先用缓存里的详情页 ID 直连（详情页无登录墙）；
+    缓存未命中才走搜索，搜索有登录墙时给出明确提示。
+
+    带 locale=zh-CN 请求中文版，演员名/标题优先返回中文。
     """
     cookies = _javdb_cookies()
+    # 1) 缓存命中：直接抓详情页，完全绕开搜索墙
+    jid = _load_javdb_ids().get(code.upper())
+    if jid:
+        try:
+            return fetch_javdb_detail(jid)
+        except Exception:
+            pass  # 缓存失效则回退到搜索
+    # 2) 搜索定位详情页 ID
     search_url = f"{JAVDB_BASE}/search?q={code}&f=all&locale=zh-CN"
     r = _get(search_url, cookies=cookies)
     soup = BeautifulSoup(r.text, "lxml")
@@ -347,7 +398,7 @@ def fetch_javdb(code):
     if page_title and "登入" in page_title.get_text(strip=True):
         raise RuntimeError(
             "JavDB 要求登录（在部署环境变量 JAVDB_COOKIES 里填入浏览器复制的 "
-            "JavDB Cookie 后可抓取）"
+            "JavDB Cookie 后可抓取；或在影片编辑里填入 JavDB 详情页 ID）"
         )
     # 优先匹配列表里编号完全一致项，否则取第一个结果
     target = None
@@ -363,11 +414,12 @@ def fetch_javdb(code):
         if a and a.get("href"):
             target = a["href"]
     if not target:
-        # 有些页面本身就是详情，直接解析搜索页
         return _parse_detail(r.text, code, JAVDB_BASE)
+    m = re.search(r"/v/([a-zA-Z0-9]{4,12})", target)
+    if m:
+        _remember_javdb_id(code, m.group(1))
     if target.startswith("/"):
         target = JAVDB_BASE + target
-    # 详情页也请求中文版（保留已有 query 参数）
     target = target + ("&" if "?" in target else "?") + "locale=zh-CN"
     detail = _get(target, cookies=cookies)
     return _parse_detail(detail.text, code, JAVDB_BASE)

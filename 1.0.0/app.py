@@ -178,6 +178,7 @@ def index():
         date_to=request.args.get("date_to", ""),
         actress=request.args.get("actress", ""),
         keyword=request.args.get("keyword", ""),
+        category=request.args.get("category", ""),
         username=user["username"],
         is_admin=user["is_admin"],
         last_date=user["last_date"],
@@ -193,6 +194,7 @@ def api_movies():
         date_to=request.args.get("date_to", ""),
         actress=request.args.get("actress", ""),
         keyword=request.args.get("keyword", ""),
+        category=request.args.get("category", ""),
     )
     return jsonify({"ok": True, "movies": movies})
 
@@ -222,7 +224,32 @@ def api_aliases():
 @login_required
 def api_scrape():
     data = request.get_json(silent=True) or {}
-    result = scraper.scrape(data.get("code", ""))
+    code = data.get("code", "")
+    jid = (data.get("javdb_id") or "").strip()
+    if jid:
+        # 指定了 JavDB 详情页 ID：直接抓详情页（无登录墙），并写入缓存供后续使用
+        try:
+            scraper._remember_javdb_id(code, jid)
+            result = scraper.fetch_javdb_detail(jid)
+            result["code"] = code
+            result["source"] = "javdb"
+            result["errors"] = []
+            aliases = db.load_aliases()
+            all_names = result.get("actress_all", []) or result.get("actress", [])
+            groups = []
+            for name in result.get("actress", []):
+                candidates = []
+                for source_name in all_names:
+                    for c in scraper.actress_candidates(source_name, aliases):
+                        if c and c not in candidates:
+                            candidates.append(c)
+                candidates.sort(key=lambda n: (not scraper._is_chinese_name(n), n != name))
+                groups.append({"original": name, "candidates": candidates})
+            result["actress_options"] = groups
+            return jsonify({"ok": True, "data": result})
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"ok": False, "error": f"JavDB 详情页抓取失败: {exc}"}), 400
+    result = scraper.scrape(code)
     aliases = db.load_aliases()
     # 同一个演员的多个写法（javbus 日文名 + javdb 中文名）合并成一组候选，
     # 统一指向一个中文名，中文名排在首位。
@@ -274,6 +301,9 @@ def api_create():
     data = request.get_json(silent=True) or {}
     try:
         movie = db.create_movie(data)
+        # 有 JavDB ID 时写入缓存，之后刮削可直接走详情页绕过搜索墙
+        if movie.get("javdb_id") and movie.get("code"):
+            scraper._remember_javdb_id(movie["code"], movie["javdb_id"])
         return jsonify({"ok": True, "movie": movie})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
@@ -297,6 +327,8 @@ def api_movie(movie_id):
     data = request.get_json(silent=True) or {}
     try:
         movie = db.update_movie(movie_id, data)
+        if movie.get("javdb_id") and movie.get("code"):
+            scraper._remember_javdb_id(movie["code"], movie["javdb_id"])
         return jsonify({"ok": True, "movie": movie})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400

@@ -29,7 +29,7 @@
         <div class="detail-cover detail-cover-empty">暂无封面</div>
       {% endif %}
       <div class="detail-cover-actions">
-        <button class="btn-primary" id="copyBtn" data-url="{{ movie.download_url }}" {% if not movie.download_url %}disabled{% endif %}>复制下载地址</button>
+        <button class="btn-primary" id="copyBtn" data-urls="{{ (movie.download_urls or [movie.download_url]) | tojson | urlencode }}" {% if not movie.download_url %}disabled{% endif %}>复制下载地址{% if movie.download_urls|length > 1 %}（{{ movie.download_urls|length }} 部）{% endif %}</button>
       </div>
     </div>
 
@@ -73,7 +73,11 @@
 
       <div class="detail-download">
         <div class="detail-label">下载地址</div>
-        {% if movie.download_url %}
+        {% if movie.download_urls and movie.download_urls|length %}
+          {% for u in movie.download_urls %}
+          <div class="detail-url" id="downloadUrl{{ loop.index }}"><span class="detail-url-index">{{ loop.index }}.</span> {{ u }}</div>
+          {% endfor %}
+        {% elif movie.download_url %}
           <div class="detail-url" id="downloadUrl">{{ movie.download_url }}</div>
         {% else %}
           <div class="detail-url detail-url-empty">{% if is_admin %}尚未录入，点右上角「编辑」补充。{% else %}尚未录入，请联系管理员补充。{% endif %}</div>

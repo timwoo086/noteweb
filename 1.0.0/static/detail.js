@@ -23,10 +23,15 @@ async function writeClipboard(text) {
 }
 
 $('copyBtn').addEventListener('click', async () => {
-  const url = $('copyBtn').dataset.url || '';
-  if (!url) { toast('该影片还没有下载地址'); return; }
-  await writeClipboard(url);
-  toast('下载地址已复制');
+  const btn = $('copyBtn');
+  let urls = [];
+  if (btn.dataset.urls) {
+    try { urls = JSON.parse(decodeURIComponent(btn.dataset.urls)); } catch (e) { /* 回退 */ }
+  }
+  if (!urls.length && btn.dataset.url) urls = [btn.dataset.url];
+  if (!urls.length) { toast('该影片还没有下载地址'); return; }
+  await writeClipboard(urls.join('\n'));
+  toast(urls.length > 1 ? `已复制 ${urls.length} 个下载地址` : '下载地址已复制');
 });
 
 // 编辑按钮回到列表并自动打开录入/编辑弹窗（普通账号没有此按钮）

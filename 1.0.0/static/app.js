@@ -2,6 +2,7 @@
 const $ = (id) => document.getElementById(id);
 
 let currentDateField = 'added_at';
+let currentCategory = '';
 let editingId = null;
 let lastScrapedCover = '';
 let lastScrapedCoverUrl = '';
@@ -74,7 +75,29 @@ function queryString() {
   if ($('dateTo').value) p.set('date_to', $('dateTo').value);
   if ($('actressFilter').value) p.set('actress', $('actressFilter').value);
   if ($('keyword').value.trim()) p.set('keyword', $('keyword').value.trim());
+  if (currentCategory) p.set('category', currentCategory);
   return p.toString();
+}
+
+// 顶部栏目标签切换：保留其他筛选条件，切换后重新加载
+function initCategoryNav() {
+  const nav = $('categoryNav');
+  if (!nav) return;
+  currentCategory = nav.dataset.current || '';
+  nav.querySelectorAll('.category-tab').forEach(a => {
+    if (a.dataset.category === currentCategory) a.classList.add('active');
+    a.addEventListener('click', e => {
+      e.preventDefault();
+      currentCategory = a.dataset.category || '';
+      nav.querySelectorAll('.category-tab').forEach(x => x.classList.toggle('active', x === a));
+      // 同步地址栏，便于刷新后保持栏目
+      const url = new URL(location.href);
+      if (currentCategory) url.searchParams.set('category', currentCategory);
+      else url.searchParams.delete('category');
+      history.replaceState(null, '', url);
+      loadMovies();
+    });
+  });
 }
 
 // ---------- 卡片渲染 ----------
@@ -163,6 +186,9 @@ function renderMovies(movies) {
     const actressLinks = (m.actress || []).map(a =>
       `<span class="actress-link" data-actress="${escapeHtml(a)}" title="点击筛选该演员">${escapeHtml(a)}</span>`
     ).join('、');
+    const allUrls = (m.download_urls && m.download_urls.length) ? m.download_urls : [m.download_url].filter(Boolean);
+    const urlsData = encodeURIComponent(JSON.stringify(allUrls));
+    const copyLabel = allUrls.length > 1 ? `复制 ${allUrls.length} 部` : '复制';
     card.innerHTML = `
       <a class="cover-wrap detail-link" href="/movie/${m.id}?date_field=${encodeURIComponent(currentDateField)}&date=${encodeURIComponent(dateGroupKey(m))}" title="查看详情">
         ${cover}
@@ -176,11 +202,11 @@ function renderMovies(movies) {
           <span>发行 <b>${escapeHtml(m.release_date) || '-'}</b></span>
         </div>
         <div class="card-foot">
-          <button class="copy-btn" data-copy="${m.id}" data-url="${escapeHtml(m.download_url)}">复制</button>
+          <button class="copy-btn" data-copy="${m.id}" data-urls="${urlsData}" title="${allUrls.length > 1 ? '一次复制全部 ' + allUrls.length + ' 个地址' : '复制下载地址'}">${copyLabel}</button>
           ${isAdmin ? `<button class="edit-btn" data-edit="${m.id}" title="编辑">✎</button>
           <button class="card-del-btn" data-del="${m.id}" title="删除此影片">✕</button>` : ''}
           <label class="select-btn" title="勾选以多选">
-            <input type="checkbox" class="movie-check" data-id="${m.id}" data-url="${escapeHtml(m.download_url)}" data-date="${escapeHtml(dateGroupKey(m))}">
+            <input type="checkbox" class="movie-check" data-id="${m.id}" data-urls="${urlsData}" data-date="${escapeHtml(dateGroupKey(m))}">
           </label>
         </div>
       </div>`;
@@ -234,15 +260,28 @@ async function writeClipboard(text) {
   }
 }
 
-// 复制与下载合并为一个按钮：有下载地址则复制，否则提示先补录
+// 从 data-urls 解析地址数组（兼容旧的单条 data-url）
+function urlsOf(el) {
+  if (el.dataset.urls) {
+    try {
+      const arr = JSON.parse(decodeURIComponent(el.dataset.urls));
+      if (Array.isArray(arr)) return arr.filter(u => u && String(u).trim());
+    } catch (e) { /* 回退到单条 */ }
+  }
+  const one = el.dataset.url || '';
+  return one ? [one] : [];
+}
+
+// 复制与下载合并为一个按钮：有下载地址则复制全部（多行），否则提示先补录
 async function copyLink(btn) {
-  const url = btn.dataset.url || '';
-  if (!url) { toast('该影片还没有下载地址，请先编辑补录'); return; }
-  await writeClipboard(url);
+  const urls = urlsOf(btn);
+  if (!urls.length) { toast('该影片还没有下载地址，请先编辑补录'); return; }
+  await writeClipboard(urls.join('\n'));
   btn.classList.add('copied');
+  const oldText = btn.textContent;
   btn.textContent = '已复制';
-  toast('下载地址已复制');
-  setTimeout(() => { btn.classList.remove('copied'); btn.textContent = '复制'; }, 1500);
+  toast(urls.length > 1 ? `已复制 ${urls.length} 个下载地址` : '下载地址已复制');
+  setTimeout(() => { btn.classList.remove('copied'); btn.textContent = oldText; }, 1500);
 }
 
 // ---------- 多选 / 全选 / 一键复制 ----------
@@ -287,9 +326,7 @@ function bindSelectAll() {
     }
   });
   $('batchCopyBtn').addEventListener('click', async () => {
-    const urls = selectedMovies()
-      .map(c => c.dataset.url)
-      .filter(u => u && u.trim());
+    const urls = selectedMovies().flatMap(c => urlsOf(c));
     if (!urls.length) { toast('选中的影片都没有下载地址'); return; }
     await writeClipboard(urls.join('\n'));
     toast(`已复制 ${urls.length} 个下载地址`);
@@ -314,6 +351,49 @@ function bindSelectAll() {
 }
 
 // ---------- 弹窗 ----------
+// 下载地址动态行：一部影片可有多个（上下两部）
+function downloadRow(value = '') {
+  const row = document.createElement('div');
+  row.className = 'download-row';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'download-input';
+  input.value = value || '';
+  input.placeholder = '磁力链接 / 网盘地址 / 本地路径';
+  const del = document.createElement('button');
+  del.type = 'button';
+  del.className = 'download-remove';
+  del.title = '删除此地址';
+  del.textContent = '✕';
+  del.addEventListener('click', () => {
+    row.remove();
+    if (!$('downloadList').children.length) addDownloadRow();
+  });
+  row.appendChild(input);
+  row.appendChild(del);
+  return row;
+}
+
+function addDownloadRow(value = '') {
+  $('downloadList').appendChild(downloadRow(value));
+}
+
+function renderDownloadRows(urls) {
+  const box = $('downloadList');
+  box.innerHTML = '';
+  (urls && urls.length ? urls : ['']).forEach(u => addDownloadRow(u));
+}
+
+function collectDownloads() {
+  return [...$('downloadList').querySelectorAll('.download-input')]
+    .map(i => i.value.trim()).filter(Boolean);
+}
+
+function bindDownloadAdd() {
+  const btn = $('addDownloadBtn');
+  if (btn) btn.addEventListener('click', () => { addDownloadRow(); $('downloadList').lastElementChild.querySelector('input').focus(); });
+}
+
 function openModal(id = null) {
   editingId = id;
   lastScrapedCover = '';
@@ -321,7 +401,9 @@ function openModal(id = null) {
   $('modalTitle').textContent = id ? '编辑影片' : '录入影片';
   $('fetchStatus').hidden = true;
   $('preview').hidden = true;
-  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fFramerate','fDownload','fNote'].forEach(i => $(i).value = '');
+  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fFramerate','fJavdbId','fNote'].forEach(i => $(i).value = '');
+  renderDownloadRows([]);
+  $('fCategory').value = currentCategory === 'LTX破解' ? 'LTX破解' : 'FT.A.V';
   $('fRes4K').checked = false;
   $('fRes1080').checked = false;
   $('fOriginal').checked = false;
@@ -348,7 +430,9 @@ function openModal(id = null) {
       $('fOriginal').checked = !!m.is_original;
       $('fBluray').checked = !!m.is_bluray;
       $('fRemux').checked = !!m.is_remux;
-      $('fDownload').value = m.download_url || '';
+      renderDownloadRows(m.download_urls && m.download_urls.length ? m.download_urls : [m.download_url || '']);
+      $('fJavdbId').value = m.javdb_id || '';
+      $('fCategory').value = m.category || 'FT.A.V';
       $('fNote').value = m.note || '';
       lastScrapedCover = m.cover_path || '';
       lastScrapedCoverUrl = m.cover_url || '';
@@ -451,9 +535,10 @@ async function doFetch() {
   status.textContent = '正在抓取两个站点…';
   $('fetchBtn').disabled = true;
 
+  const jid = $('fJavdbId') ? $('fJavdbId').value.trim() : '';
   const res = await api('/api/scrape', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({code})
+    body: JSON.stringify(jid ? {code, javdb_id: jid} : {code})
   });
   $('fetchBtn').disabled = false;
   if (!res || !res.ok) { status.textContent = '抓取请求失败'; status.classList.add('error'); return; }
@@ -490,7 +575,9 @@ async function saveMovie() {
     is_original: $('fOriginal').checked ? 1 : 0,
     is_bluray: $('fBluray').checked ? 1 : 0,
     is_remux: $('fRemux').checked ? 1 : 0,
-    download_url: $('fDownload').value.trim(),
+    download_urls: collectDownloads(),
+    javdb_id: $('fJavdbId').value.trim(),
+    category: $('fCategory').value,
     note: $('fNote').value.trim(),
     cover_path: lastScrapedCover,
     cover_url: lastScrapedCoverUrl,
@@ -805,6 +892,8 @@ function bind() {
 
 async function init() {
   initDateSeg();
+  initCategoryNav();
+  bindDownloadAdd();
   bind();
   await loadActresses();
   await loadMovies();

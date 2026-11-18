@@ -80,6 +80,9 @@ def init_db():
             cover_path    TEXT NOT NULL DEFAULT '',
             cover_url     TEXT NOT NULL DEFAULT '',
             download_url  TEXT NOT NULL DEFAULT '',
+            download_urls TEXT NOT NULL DEFAULT '[]',
+            javdb_id      TEXT NOT NULL DEFAULT '',
+            category      TEXT NOT NULL DEFAULT 'FT.A.V',
             source        TEXT NOT NULL DEFAULT '',
             note          TEXT NOT NULL DEFAULT '',
             created_at    TEXT NOT NULL,
@@ -87,12 +90,25 @@ def init_db():
         )
         """
     )
-    # 向后兼容：旧库没有 cover_url 列时补上
+    # 向后兼容：旧库缺列时补齐。category 默认 FT.A.V——升级后现有影片自动归入该栏目
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(movies)").fetchall()}
     if "cover_url" not in cols:
         conn.execute("ALTER TABLE movies ADD COLUMN cover_url TEXT NOT NULL DEFAULT ''")
     if "is_bluray" not in cols:
         conn.execute("ALTER TABLE movies ADD COLUMN is_bluray INTEGER NOT NULL DEFAULT 0")
+    if "download_urls" not in cols:
+        conn.execute("ALTER TABLE movies ADD COLUMN download_urls TEXT NOT NULL DEFAULT '[]'")
+        # 把旧的单条 download_url 迁移进数组
+        for r in conn.execute("SELECT id, download_url FROM movies").fetchall():
+            if r["download_url"]:
+                conn.execute(
+                    "UPDATE movies SET download_urls=? WHERE id=?",
+                    (json.dumps([r["download_url"]], ensure_ascii=False), r["id"]),
+                )
+    if "javdb_id" not in cols:
+        conn.execute("ALTER TABLE movies ADD COLUMN javdb_id TEXT NOT NULL DEFAULT ''")
+    if "category" not in cols:
+        conn.execute("ALTER TABLE movies ADD COLUMN category TEXT NOT NULL DEFAULT 'FT.A.V'")
 
     # 多账号：用户名 + 密码哈希，last_date 记录该账号最近操作的日期分组
     conn.execute(
@@ -127,6 +143,18 @@ def _row_to_dict(row):
         d["actress"] = json.loads(d.get("actress") or "[]")
     except (ValueError, TypeError):
         d["actress"] = []
+    # 多条下载地址：解析 JSON 数组；旧记录只有 download_url 时兜底成单元素数组
+    try:
+        urls = json.loads(d.get("download_urls") or "[]")
+        if not isinstance(urls, list):
+            urls = []
+    except (ValueError, TypeError):
+        urls = []
+    if not urls and d.get("download_url"):
+        urls = [d["download_url"]]
+    d["download_urls"] = [str(u) for u in urls if str(u).strip()]
+    # download_url 保持为第一条，兼容旧前端/详情页
+    d["download_url"] = d["download_urls"][0] if d["download_urls"] else ""
     return d
 
 
@@ -144,12 +172,15 @@ def get_by_code(code):
     return _row_to_dict(row)
 
 
-def list_movies(date_field="added_at", date_from="", date_to="", actress="", keyword=""):
-    """按日期区间 / 演员 / 关键字筛选。date_field 仅允许 release_date 或 added_at。"""
+def list_movies(date_field="added_at", date_from="", date_to="", actress="", keyword="", category=""):
+    """按栏目 / 日期区间 / 演员 / 关键字筛选。date_field 仅允许 release_date 或 added_at。"""
     if date_field not in ("release_date", "added_at"):
         date_field = "added_at"
     clauses, args = [], []
 
+    if category:
+        clauses.append("category = ?")
+        args.append(category)
     if date_from:
         clauses.append(f"{date_field} >= ?")
         args.append(date_from)
@@ -197,6 +228,13 @@ def _normalize(data):
     if isinstance(actresses, str):
         # 支持逗号/顿号分隔的手动输入
         actresses = [a.strip() for a in actresses.replace("，", ",").split(",") if a.strip()]
+    # 多条下载地址：优先 download_urls 数组，兼容旧的单个 download_url
+    urls = data.get("download_urls")
+    if urls is None:
+        urls = [data.get("download_url", "")]
+    if isinstance(urls, str):
+        urls = [u for u in urls.split("\n") if u.strip()]
+    urls = [str(u).strip() for u in urls if str(u).strip()]
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     return {
         "code": str(data.get("code", "")).strip().upper(),
@@ -208,10 +246,13 @@ def _normalize(data):
         "is_original": 1 if str(data.get("is_original", "0")) in ("1", "true", "on", "True") else 0,
         "is_bluray": 1 if str(data.get("is_bluray", "0")) in ("1", "true", "on", "True") else 0,
         "is_remux": 1 if str(data.get("is_remux", "0")) in ("1", "true", "on", "True") else 0,
-        "framerate": str(data.get("framerate", "")).strip(),
+        "framerate": str(data.get("framerate", "") or "").strip(),
         "cover_path": str(data.get("cover_path", "")).strip(),
         "cover_url": str(data.get("cover_url", "")).strip(),
-        "download_url": str(data.get("download_url", "")).strip(),
+        "download_urls": json.dumps(urls, ensure_ascii=False),
+        "download_url": urls[0] if urls else "",
+        "javdb_id": str(data.get("javdb_id", "") or "").strip(),
+        "category": str(data.get("category", "") or "FT.A.V").strip() or "FT.A.V",
         "source": str(data.get("source", "")).strip(),
         "note": str(data.get("note", "")).strip(),
         "now": now,
@@ -220,9 +261,9 @@ def _normalize(data):
 
 _INSERT_SQL = """INSERT INTO movies
    (code,title,actress,release_date,added_at,resolution,is_original,is_bluray,is_remux,
-    framerate,cover_path,cover_url,download_url,source,note,created_at,updated_at)
+    framerate,cover_path,cover_url,download_url,download_urls,javdb_id,category,source,note,created_at,updated_at)
    VALUES (:code,:title,:actress,:release_date,:added_at,:resolution,:is_original,:is_bluray,:is_remux,
-    :framerate,:cover_path,:cover_url,:download_url,:source,:note,:now,:now)"""
+    :framerate,:cover_path,:cover_url,:download_url,:download_urls,:javdb_id,:category,:source,:note,:now,:now)"""
 
 
 def _insert_movie(conn, d):
@@ -265,8 +306,8 @@ def update_movie(movie_id, data):
         """UPDATE movies SET
              code=:code,title=:title,actress=:actress,release_date=:release_date,added_at=:added_at,
              resolution=:resolution,is_original=:is_original,is_bluray=:is_bluray,is_remux=:is_remux,framerate=:framerate,
-             cover_path=:cover_path,cover_url=:cover_url,download_url=:download_url,source=:source,
-             note=:note,updated_at=:now
+             cover_path=:cover_path,cover_url=:cover_url,download_url=:download_url,download_urls=:download_urls,
+             javdb_id=:javdb_id,category=:category,source=:source,note=:note,updated_at=:now
            WHERE id=:id""",
         {**d, "id": movie_id},
     )

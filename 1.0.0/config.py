@@ -26,4 +26,8 @@ HTTP_PROXY = os.environ.get("HTTP_PROXY", "")
 # 整串贴进来（如 "remember_id=xx; remember_token=yy; ..."）即可免登录抓取。
 JAVDB_COOKIES = os.environ.get("JAVDB_COOKIES", "")
 
+# 番号 → JavDB 详情页 ID 缓存：搜索页有登录墙，但详情页可直连。
+# 成功刮过的番号记下 ID 后，下次直接走详情页，绕开搜索墙。存在挂载卷内，升级不丢。
+JAVDB_IDS_PATH = os.path.join(DATA_DIR, "javdb_ids.json")
+
 os.makedirs(COVER_DIR, exist_ok=True)

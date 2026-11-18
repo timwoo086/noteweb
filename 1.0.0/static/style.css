@@ -32,7 +32,15 @@ button { cursor: pointer; }
   background: #eef3ff; color: var(--primary); border-radius: 20px;
   font-size: 12px; font-weight: 600; text-align: center; vertical-align: middle;
 }
-.topbar-actions { display: flex; gap: 10px; align-items: center; }
+/* 顶部栏目标签：影片库 / FT.A.V / LTX破解 */
+.category-nav { display: flex; gap: 4px; align-items: center; margin-left: 24px; }
+.category-tab {
+  padding: 6px 14px; border-radius: 7px; color: var(--muted); font-size: 14px;
+  text-decoration: none; white-space: nowrap; transition: background .15s, color .15s;
+}
+.category-tab:hover { background: #f1f5fb; color: var(--text); }
+.category-tab.active { background: var(--primary); color: #fff; font-weight: 600; }
+.topbar-actions { display: flex; gap: 10px; align-items: center; margin-left: auto; }
 .user-name { color: var(--muted); font-size: 13px; }
 .admin-badge {
   display: inline-block; margin-left: 4px; padding: 1px 6px; border-radius: 10px;
@@ -357,3 +365,19 @@ a.card-title.detail-link:hover { color: var(--primary); }
 .rename-row input { flex: 1; }
 .rename-arrow { color: var(--muted); flex-shrink: 0; }
 .rename-row .btn-primary { flex-shrink: 0; height: 34px; }
+
+/* ---------- 多条下载地址（上下两部） ---------- */
+.form-hint { color: var(--muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.download-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+.download-row { display: flex; gap: 8px; align-items: center; }
+.download-input {
+  flex: 1; min-width: 0; height: 36px; padding: 0 10px;
+  border: 1px solid var(--border); border-radius: 6px; outline: none;
+}
+.download-input:focus { border-color: var(--primary); }
+.download-remove {
+  flex-shrink: 0; width: 34px; height: 34px; border: 1px solid var(--border);
+  background: #fff; color: var(--muted); border-radius: 6px; cursor: pointer;
+}
+.download-remove:hover { color: #d33; border-color: #d33; }
+.detail-url-index { color: var(--primary); font-weight: 600; margin-right: 4px; }
