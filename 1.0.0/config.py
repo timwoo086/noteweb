@@ -30,4 +30,13 @@ JAVDB_COOKIES = os.environ.get("JAVDB_COOKIES", "")
 # 成功刮过的番号记下 ID 后，下次直接走详情页，绕开搜索墙。存在挂载卷内，升级不丢。
 JAVDB_IDS_PATH = os.path.join(DATA_DIR, "javdb_ids.json")
 
+# FlareSolverr（可选）：用于绕过 Cloudflare 人机验证 / JS Challenge。
+# 留空表示不启用；填入 FlareSolverr 服务地址（如 http://flaresolverr:8191 或
+# http://192.168.5.3:8191）后，正常抓取被 CF 挑战页拦截时会自动改走它求解，
+# 拿回真实页面与 cf_clearance cookie。对 MissAV / JavBus 等 CF 站有用。
+FLARESOLVERR_URL = os.environ.get("FLARESOLVERR_URL", "").rstrip("/")
+# FlareSolverr 求解较耗时，默认超时与缓存时长（秒）
+FLARESOLVERR_TIMEOUT = int(os.environ.get("FLARESOLVERR_TIMEOUT", "60"))
+FLARESOLVERR_CACHE_TTL = int(os.environ.get("FLARESOLVERR_CACHE_TTL", "1800"))
+
 os.makedirs(COVER_DIR, exist_ok=True)
