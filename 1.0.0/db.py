@@ -218,25 +218,42 @@ def _normalize(data):
     }
 
 
+_INSERT_SQL = """INSERT INTO movies
+   (code,title,actress,release_date,added_at,resolution,is_original,is_bluray,is_remux,
+    framerate,cover_path,cover_url,download_url,source,note,created_at,updated_at)
+   VALUES (:code,:title,:actress,:release_date,:added_at,:resolution,:is_original,:is_bluray,:is_remux,
+    :framerate,:cover_path,:cover_url,:download_url,:source,:note,:now,:now)"""
+
+
+def _insert_movie(conn, d):
+    conn.execute(_INSERT_SQL, d)
+    conn.commit()
+    return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+
 def create_movie(data):
     d = _normalize(data)
     if not d["code"]:
         raise ValueError("编号不能为空")
     conn = connect()
     try:
-        conn.execute(
-            """INSERT INTO movies
-               (code,title,actress,release_date,added_at,resolution,is_original,is_bluray,is_remux,
-                framerate,cover_path,cover_url,download_url,source,note,created_at,updated_at)
-               VALUES (:code,:title,:actress,:release_date,:added_at,:resolution,:is_original,:is_bluray,:is_remux,
-                :framerate,:cover_path,:cover_url,:download_url,:source,:note,:now,:now)""",
-            d,
-        )
-        conn.commit()
-        movie_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        movie_id = _insert_movie(conn, d)
     except sqlite3.IntegrityError:
-        conn.close()
-        raise ValueError(f"编号 {d['code']} 已存在")
+        # 洗版共存：备注含「洗版」时同番号允许多条并存，自动追加 -R2/-R3… 后缀
+        if "洗版" not in d["note"]:
+            conn.close()
+            raise ValueError(f"编号 {d['code']} 已存在")
+        base, movie_id, n = d["code"], None, 2
+        while n <= 99:
+            d["code"] = f"{base}-R{n}"
+            try:
+                movie_id = _insert_movie(conn, d)
+                break
+            except sqlite3.IntegrityError:
+                n += 1
+        if movie_id is None:
+            conn.close()
+            raise ValueError(f"编号 {base} 洗版后缀已用尽（-R2 ~ -R99 均被占用）")
     conn.close()
     return get_movie(movie_id)
 
