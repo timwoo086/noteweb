@@ -2,7 +2,7 @@
 const $ = (id) => document.getElementById(id);
 
 let currentDateField = 'added_at';
-let currentCategory = '';
+let currentCategory = 'FT.A.V';
 let editingId = null;
 let lastScrapedCover = '';
 let lastScrapedCoverUrl = '';
@@ -83,19 +83,20 @@ function queryString() {
 function initCategoryNav() {
   const nav = $('categoryNav');
   if (!nav) return;
-  currentCategory = nav.dataset.current || '';
+  currentCategory = nav.dataset.current || 'FT.A.V';
   nav.querySelectorAll('.category-tab').forEach(a => {
     if (a.dataset.category === currentCategory) a.classList.add('active');
     a.addEventListener('click', e => {
       e.preventDefault();
-      currentCategory = a.dataset.category || '';
+      const next = a.dataset.category || 'FT.A.V';
+      if (next === currentCategory) return;  // 点当前栏目不重复加载
+      currentCategory = next;
       nav.querySelectorAll('.category-tab').forEach(x => x.classList.toggle('active', x === a));
       // 同步地址栏，便于刷新后保持栏目
       const url = new URL(location.href);
-      if (currentCategory) url.searchParams.set('category', currentCategory);
-      else url.searchParams.delete('category');
+      url.searchParams.set('category', currentCategory);
       history.replaceState(null, '', url);
-      loadMovies();
+      loadMovies(true);  // 立即重新拉取并渲染，无需 F5
     });
   });
 }
@@ -243,8 +244,9 @@ function renderMovies(movies) {
   updateSelectUI();
 }
 
-async function loadMovies() {
-  const res = await api('/api/movies?' + queryString());
+async function loadMovies(force = false) {
+  const qs = queryString() + (force ? '&_t=' + Date.now() : '');
+  const res = await api('/api/movies?' + qs, {cache: 'no-store'});
   if (!res || !res.ok) return;
   renderMovies(res.movies);
 }
