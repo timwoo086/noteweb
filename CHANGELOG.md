@@ -4,6 +4,14 @@
 
 ---
 
+## v0.0.27 — 刮削源实测与 JavDB 搜索批量缓存
+
+**提交**：`cc46f0c`
+
+- **21 个刮削源实测**：通过甲骨文美国凤凰城节点（新 Reality 节点，出口 161.153.16.240）逐一测试截图里的 Airav/Avbase/Avmoo/Avsex/Carib/Dmm/Faleno/Fc2/Fc2_hub/Hbox/Jav321/Javbus/Javdb/Javlibrary/Madou/Madouqu/Mgstage/MissAV/7mmtv/ThePornDB/小黄书。结论：机房 IP 下绝大多数被 Cloudflare 拦截、地区限制或需登录；**仅 JavDB 搜索+详情页稳定可用**（JavBus 首页通但详情 403）。
+- **JavDB 搜索批量缓存**：搜索一个番号时，把结果页里所有「番号→详情页ID」映射一次性写入 `data/javdb_ids.json`（实测单次可缓存 24 个番号），后续抓同批番号直接走详情页，大幅减少搜索次数，降低触发登录墙（频率限制）的概率。
+- 配合 v0.0.26 的「填番号自动转 ID + 缓存优先」，刮削稳定性和成功率进一步提升。
+
 ## v0.0.26 — JavDB 填番号自动抓取（无需手找 ID）
 
 **提交**：`6bdefab`
