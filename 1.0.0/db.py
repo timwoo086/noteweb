@@ -258,12 +258,17 @@ def _normalize(data):
         urls = [u for u in urls.split("\n") if u.strip()]
     urls = [str(u).strip() for u in urls if str(u).strip()]
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # 录入时间：默认留空时自动记当天（前端表单兜底）；传 auto_date=False 可显式
+    # 留空（批量导入无日期数据的场景），列表归入「未标注日期」分组。
+    added = str(data.get("added_at", "")).strip()
+    if not added and data.get("auto_date", True):
+        added = now[:10]
     return {
         "code": str(data.get("code", "")).strip().upper(),
         "title": str(data.get("title", "")).strip(),
         "actress": json.dumps(actresses, ensure_ascii=False),
         "release_date": str(data.get("release_date", "")).strip(),
-        "added_at": str(data.get("added_at", "")).strip() or now[:10],
+        "added_at": added,
         "resolution": str(data.get("resolution", "")).strip(),
         "is_original": 1 if str(data.get("is_original", "0")) in ("1", "true", "on", "True") else 0,
         "is_bluray": 1 if str(data.get("is_bluray", "0")) in ("1", "true", "on", "True") else 0,
