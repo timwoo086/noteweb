@@ -1,6 +1,7 @@
 """影片管理库：Flask 单服务（页面 + API + 抓取 + 静态封面）。"""
 import functools
 import os
+import re
 import threading
 from collections import defaultdict
 
@@ -225,13 +226,27 @@ def api_aliases():
 def api_scrape():
     data = request.get_json(silent=True) or {}
     code = data.get("code", "")
-    jid = (data.get("javdb_id") or "").strip()
-    if jid:
-        # 指定了 JavDB 详情页 ID：直接抓详情页（无登录墙），并写入缓存供后续使用
+    javdb_query = (data.get("javdb_id") or "").strip()
+    if javdb_query:
+        # 用户填的是 JavDB 影片番号：后台自动搜索匹配 → 详情页 ID → 抓标题/日期/封面/演员。
+        # 兼容旧填法：/v/p4aG5、完整链接、纯 ID（p4aG5）。
         try:
+            m = re.search(r"/v/([a-zA-Z0-9]{4,12})", javdb_query)
+            if m:
+                jid = m.group(1)
+            elif re.fullmatch(r"[a-zA-Z0-9]{4,12}", javdb_query) and not javdb_query[0].isdigit():
+                jid = javdb_query  # 纯 ID 形式（字母开头，如 p4aG5）
+            else:
+                # 番号：先查缓存（登录墙下也能用），未命中才实时搜索匹配
+                jid = scraper._load_javdb_ids().get(javdb_query.upper()) or scraper._load_javdb_ids().get(code.upper())
+                if not jid:
+                    jid = scraper._search_javdb_id(javdb_query, code)  # 番号 → 自动匹配 ID
+            if not jid:
+                return jsonify({"ok": False, "error": "JavDB 未找到该番号对应的影片"}), 404
             scraper._remember_javdb_id(code, jid)
-            result = scraper.fetch_javdb_detail(jid)
+            result = scraper.fetch_javdb_detail(jid, javdb_query)
             result["code"] = code
+            result["javdb_id"] = jid
             result["source"] = "javdb"
             result["errors"] = []
             aliases = db.load_aliases()
@@ -248,7 +263,10 @@ def api_scrape():
             result["actress_options"] = groups
             return jsonify({"ok": True, "data": result})
         except Exception as exc:  # noqa: BLE001
-            return jsonify({"ok": False, "error": f"JavDB 详情页抓取失败: {exc}"}), 400
+            err = str(exc)
+            if "要求登录" in err or "登录" in err:
+                err += "；稍后重试或在部署环境变量 JAVDB_COOKIES 填入浏览器 Cookie 可解"
+            return jsonify({"ok": False, "error": f"JavDB 抓取失败: {err}"}), 400
     result = scraper.scrape(code)
     aliases = db.load_aliases()
     # 同一个演员的多个写法（javbus 日文名 + javdb 中文名）合并成一组候选，
