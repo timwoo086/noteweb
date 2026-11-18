@@ -10,6 +10,14 @@ let actressOptions = [];
 const isAdmin = document.body.dataset.isAdmin === '1';
 let lastDate = document.body.dataset.lastDate || '';
 
+// 分页：首屏只加载第一页（默认 120 条），滚动到底部再追加，避免一次传输/渲染上千条
+const PAGE_SIZE = 120;
+let moviePage = 1;
+let movieTotal = 0;
+let movieHasMore = false;
+let movieLoading = false;
+let lastRenderedDateKey = null;   // 追加时用于合并跨页的同一日期组
+
 function toast(msg) {
   const el = $('toast');
   el.textContent = msg;
@@ -124,10 +132,13 @@ function prettyDate(key) {
   return `${y}年${Number(m)}月${Number(d)}日`;
 }
 
-function renderMovies(movies) {
+function renderMovies(movies, append = false) {
   const grid = $('movieGrid');
-  grid.innerHTML = '';
-  $('totalCount').textContent = movies.length;
+  if (!append) {
+    grid.innerHTML = '';
+    lastRenderedDateKey = null;
+  }
+  $('totalCount').textContent = movieTotal || movies.length;
   $('empty').hidden = movies.length > 0;
   $('empty').textContent = '没有符合条件的影片，换个筛选条件试试。';
 
@@ -145,21 +156,32 @@ function renderMovies(movies) {
   });
 
   sortedKeys.forEach(key => {
-    const section = document.createElement('section');
-    section.className = 'date-group';
-    const label = document.createElement('div');
-    label.className = 'date-group-head';
-    label.innerHTML = `
-      <label class="date-check" title="勾选该日期的全部影片">
-        <input type="checkbox" class="date-group-check" data-date="${escapeHtml(key)}">
-        <span>${escapeHtml(prettyDate(key))}</span>
-      </label>
-      ${key === lastDate ? '<span class="last-here">（上次到这里）</span>' : ''}
-      <span class="date-group-count">${groups.get(key).length} 部</span>`;
-    section.appendChild(label);
-    const cards = document.createElement('div');
-    cards.className = 'date-group-grid';
-    section.appendChild(cards);
+    // 追加页若与上一页末尾同一天，复用该日期组，避免拆成两个相同的日期标题
+    let section = null, cards = null;
+    if (append && lastRenderedDateKey === key && grid.lastElementChild && grid.lastElementChild.classList.contains('date-group')) {
+      section = grid.lastElementChild;
+      cards = section.querySelector('.date-group-grid');
+      const cnt = section.querySelector('.date-group-count');
+      if (cnt) cnt.textContent = (parseInt(cnt.textContent, 10) || 0) + groups.get(key).length + ' 部';
+    }
+    if (!section) {
+      section = document.createElement('section');
+      section.className = 'date-group';
+      const label = document.createElement('div');
+      label.className = 'date-group-head';
+      label.innerHTML = `
+        <label class="date-check" title="勾选该日期的全部影片">
+          <input type="checkbox" class="date-group-check" data-date="${escapeHtml(key)}">
+          <span>${escapeHtml(prettyDate(key))}</span>
+        </label>
+        ${key === lastDate ? '<span class="last-here">（上次到这里）</span>' : ''}
+        <span class="date-group-count">${groups.get(key).length} 部</span>`;
+      section.appendChild(label);
+      cards = document.createElement('div');
+      cards.className = 'date-group-grid';
+      section.appendChild(cards);
+      grid.appendChild(section);
+    }
 
     groups.get(key).forEach(m => {
     const card = document.createElement('div');
@@ -213,22 +235,28 @@ function renderMovies(movies) {
       </div>`;
     cards.appendChild(card);
     });
-    grid.appendChild(section);
+    lastRenderedDateKey = key;
   });
 
-  grid.querySelectorAll('[data-copy]').forEach(btn => {
-    btn.addEventListener('click', () => copyLink(btn));
-  });
-  grid.querySelectorAll('[data-edit]').forEach(btn => {
-    btn.addEventListener('click', () => openModal(Number(btn.dataset.edit)));
-  });
-  grid.querySelectorAll('[data-del]').forEach(btn => {
-    btn.addEventListener('click', () => removeMovie(Number(btn.dataset.del)));
-  });
-  // 点击演员名 → 按该演员（含别名组）筛选
-  grid.querySelectorAll('.actress-link').forEach(el => {
-    el.addEventListener('click', () => {
-      const name = el.dataset.actress;
+  // 卡片按钮用事件委托（在 bind() 里绑定到 grid 一次），追加页无需重复绑定
+  updateSelectUI();
+  updateLoadMoreUI();
+}
+
+// 卡片区域事件委托：首屏与滚动追加的卡片统一生效
+function bindGridDelegates() {
+  const grid = $('movieGrid');
+  grid.addEventListener('click', e => {
+    const copy = e.target.closest('[data-copy]');
+    if (copy) { copyLink(copy); return; }
+    const edit = e.target.closest('[data-edit]');
+    if (edit) { openModal(Number(edit.dataset.edit)); return; }
+    const del = e.target.closest('[data-del]');
+    if (del) { removeMovie(Number(del.dataset.del)); return; }
+    // 点击演员名 → 按该演员（含别名组）筛选
+    const link = e.target.closest('.actress-link');
+    if (link) {
+      const name = link.dataset.actress;
       const sel = $('actressFilter');
       // 下拉里没有该名字（如别名）时补一个选项，保证能选中
       if (![...sel.options].some(o => o.value === name)) {
@@ -239,16 +267,51 @@ function renderMovies(movies) {
       sel.value = name;
       loadMovies();
       window.scrollTo({top: 0, behavior: 'smooth'});
-    });
+    }
   });
-  updateSelectUI();
 }
 
+function updateLoadMoreUI() {
+  const bar = $('loadMore');
+  if (!bar) return;
+  const loaded = document.querySelectorAll('.movie-check').length;
+  $('loadMoreText').textContent = `已显示 ${loaded} / 共 ${movieTotal || loaded} 部`;
+  $('loadProgress').textContent = `已加载 ${loaded}/${movieTotal || loaded}`;
+  bar.hidden = !movieHasMore;
+  $('loadProgress').hidden = !movieHasMore;
+}
+
+// 重新加载（筛选/搜索/切换栏目/ force 刷新）：回到第 1 页
 async function loadMovies(force = false) {
-  const qs = queryString() + (force ? '&_t=' + Date.now() : '');
-  const res = await api('/api/movies?' + qs, {cache: 'no-store'});
+  const p = new URLSearchParams(queryString());
+  p.set('page', '1');
+  p.set('page_size', String(PAGE_SIZE));
+  if (force) p.set('_t', String(Date.now()));
+  const res = await api('/api/movies?' + p.toString(), {cache: 'no-store'});
   if (!res || !res.ok) return;
-  renderMovies(res.movies);
+  moviePage = res.page || 1;
+  movieTotal = res.total ?? res.movies.length;
+  movieHasMore = !!res.has_more;
+  renderMovies(res.movies, false);
+}
+
+// 滚动到底部加载下一页：追加到已有日期组，保留勾选状态
+async function loadMore() {
+  if (movieLoading || !movieHasMore) return;
+  movieLoading = true;
+  try {
+    const p = new URLSearchParams(queryString());
+    p.set('page', String(moviePage + 1));
+    p.set('page_size', String(PAGE_SIZE));
+    const res = await api('/api/movies?' + p.toString(), {cache: 'no-store'});
+    if (!res || !res.ok) return;
+    moviePage = res.page || (moviePage + 1);
+    movieTotal = res.total ?? movieTotal;
+    movieHasMore = !!res.has_more;
+    renderMovies(res.movies, true);
+  } finally {
+    movieLoading = false;
+  }
 }
 
 // 通用剪贴板写入（带降级方案）
@@ -313,8 +376,24 @@ function updateSelectUI() {
 }
 
 function bindSelectAll() {
-  $('selectAll').addEventListener('change', e => {
-    document.querySelectorAll('.movie-check').forEach(c => { c.checked = e.target.checked; });
+  $('selectAll').addEventListener('change', async e => {
+    // 注意：加载更多会重建部分 DOM，全选框的 checked 可能被浏览器改写，
+    // 因此在任何 await 之前先捕获用户意图。
+    const wantChecked = e.target.checked;
+    // 勾选全部时：若还有未加载的页，先把剩余页拉完，保证"全选"覆盖所有筛选结果
+    if (wantChecked && movieHasMore) {
+      const btn = $('loadMoreBtn');
+      if (btn) btn.disabled = true;
+      $('loadProgress').textContent = '正在加载全部影片…';
+      try {
+        let guard = 0;
+        while (movieHasMore && guard++ < 100) await loadMore();
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+    document.querySelectorAll('.movie-check').forEach(c => { c.checked = wantChecked; });
+    e.target.checked = wantChecked;
     updateSelectUI();
   });
   document.getElementById('movieGrid').addEventListener('change', e => {
@@ -890,6 +969,14 @@ function bind() {
     else closeModal();
   });
   bindSelectAll();
+  bindGridDelegates();
+  // 手动加载更多 + 滚动到底自动加载（首屏只拉一页，数据量大时按需取）
+  const moreBtn = $('loadMoreBtn');
+  if (moreBtn) moreBtn.addEventListener('click', loadMore);
+  window.addEventListener('scroll', () => {
+    if (!movieHasMore || movieLoading) return;
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 300) loadMore();
+  }, {passive: true});
 }
 
 async function init() {
@@ -897,7 +984,8 @@ async function init() {
   initCategoryNav();
   bindDownloadAdd();
   bind();
-  await loadActresses();
+  // 演员列表与首屏影片并行拉取，减少首屏等待
+  loadActresses();
   await loadMovies();
   // 从详情页点「编辑」回来时自动打开对应弹窗（普通账号不能编辑）
   const editId = new URLSearchParams(location.search).get('edit');
