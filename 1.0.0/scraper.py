@@ -23,8 +23,7 @@ from bs4 import BeautifulSoup
 
 from config import (
     COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, JAVDB_IDS_PATH,
-    REQUEST_TIMEOUT, RETRY,
-    TRAWL_URL, TRAWL_TIMEOUT,
+    REQUEST_TIMEOUT, RETRY, SCRAPE_TIMEOUT, SCRAPER_SOURCES,
 )
 
 JAVBUS_BASE = "https://www.javbus.com"
@@ -142,88 +141,18 @@ _session = requests.Session()
 _session.trust_env = False
 
 
-def _is_cf_challenge(resp):
-    """判断响应是否是 Cloudflare 人机验证 / JS Challenge 页面。"""
-    if resp is None:
-        return False
-    if getattr(resp, "status_code", 0) in (403, 429, 503):
-        text = (getattr(resp, "text", "") or "")[:6000].lower()
-        markers = (
-            "just a moment", "cf-browser-verification", "cf-challenge",
-            "checking your browser", "enable javascript and cookies",
-            "attention required", "cloudflare", "ray id",
-        )
-        if any(m in text for m in markers):
-            return True
-    return False
-
-
-# TRAWL 求解：TRAWL 服务端自带 clearance 缓存与浏览器池（/scrape 原生接口），
-# 客户端无需维护 session，重复请求由服务端复用已验证的会话快速返回
-def _trawl_solve(url):
-    """调用 TRAWL 原生接口求解被 Cloudflare/Turnstile 等拦截的页面。
-
-    返回 (html, cookies_dict, user_agent)；未配置 TRAWL_URL 或求解失败时返回 None。
-    """
-    if not TRAWL_URL:
-        return None
-    try:
-        r = requests.post(
-            TRAWL_URL + "/scrape",
-            json={
-                "url": url,
-                "solveEmbeddedCaptchas": False,   # 只需页面内容，不解表单验证码
-                "maxTimeout": TRAWL_TIMEOUT * 1000,
-            },
-            timeout=TRAWL_TIMEOUT + 15, proxies=_proxies(),
-        )
-        if not r.ok:
-            return None
-        data = r.json()
-        html = data.get("html") or ""
-        if not html:
-            return None
-        cookies = {
-            c.get("name"): c.get("value", "")
-            for c in data.get("cookies") or [] if c.get("name")
-        }
-        return html, cookies, data.get("userAgent") or ""
-    except Exception:
-        # 求解失败不影响原流程，由调用方按原样报错
-        return None
-
-
-class _SimpleResp:
-    """TRAWL 求解结果的轻量响应对象，兼容现有解析逻辑用到的属性。"""
-
-    def __init__(self, _text, _url):
-        self.status_code = 200
-        self.text = _text
-        self.url = _url
-        self.headers = {}
-
-
-def _trawl_get(url, cookies=None):
-    """通过 TRAWL 拿页面，返回类 requests.Response 的轻量对象；失败返回 None。"""
-    solved = _trawl_solve(url)
-    if solved is None:
-        return None
-    html, _cookies, _ua = solved
-    return _SimpleResp(html, url)
-
-
 def _impersonate_get(url, cookies=None):
     """带浏览器 TLS 指纹的 GET（curl_cffi），用于有 Cloudflare 的站点。
 
-    curl_cffi 缺失或代理协议不兼容时回退到普通 requests；
-    若返回结果仍是 CF 挑战页，且配置了 TRAWL，则自动改走 TRAWL 求解。
+    curl_cffi 缺失或代理协议不兼容时回退到普通 requests。
+    被拦的挑战页不做浏览器求解，由调用方按页面特征给出明确报错。
     """
     resp = None
     if _creq is not None:
         try:
             # 4xx（含 CF 挑战页 403）也返回响应体，由调用方按页面特征给出明确报错
             resp = _creq.get(
-                url, impersonate="chrome124", timeout=REQUEST_TIMEOUT,
+                url, impersonate="chrome124", timeout=SCRAPE_TIMEOUT,
                 proxies=_proxies() or None, cookies=cookies,
                 allow_redirects=True,
             )
@@ -235,10 +164,6 @@ def _impersonate_get(url, cookies=None):
     if resp is None:
         resp = _get(url, cookies=cookies)
 
-    if _is_cf_challenge(resp):
-        tr = _trawl_get(url, cookies=cookies)
-        if tr is not None:
-            return tr
     return resp
 
 
@@ -253,21 +178,10 @@ def _get(url, cookies=None, extra_headers=None):
                 url, headers=headers, timeout=REQUEST_TIMEOUT,
                 proxies=_proxies(), allow_redirects=True, cookies=cookies,
             )
-            # CF 挑战页（403/503 等）先不抛，交给下面的 TRAWL 判断
-            if _is_cf_challenge(r):
-                tr = _trawl_get(url, cookies=cookies)
-                if tr is not None:
-                    return tr
             r.raise_for_status()
             return r
         except Exception as exc:  # noqa: BLE001 - 站点异常多样，统一兜底
             last = exc
-            # 4xx/5xx 的 HTTPError 里带响应，若正是 CF 挑战页则走 TRAWL
-            resp = getattr(exc, "response", None)
-            if _is_cf_challenge(resp):
-                tr = _trawl_get(url, cookies=cookies)
-                if tr is not None:
-                    return tr
     raise last
 
 
@@ -475,7 +389,9 @@ def fetch_javdb_detail(jid, code=""):
     last = None
     for attempt in range(4):
         try:
-            r = _get(url, cookies=_javdb_cookies())
+            # 必须走浏览器指纹请求：机房出口下普通 requests 的裸 TLS 指纹
+            # 会被 JavDB 的 Cloudflare 直接拒连（实测超时），指纹请求才可达
+            r = _impersonate_get(url, cookies=_javdb_cookies())
             return _parse_detail(r.text, code or jid, JAVDB_BASE)
         except Exception as exc:  # noqa: BLE001
             last = exc
@@ -496,7 +412,8 @@ def _search_javdb_id(query_code, code=""):
     soup = None
     for attempt in range(4):
         try:
-            r = _get(search_url, cookies=cookies)
+            # 搜索页同样必须走浏览器指纹请求（机房出口下裸 TLS 会被拒连）
+            r = _impersonate_get(search_url, cookies=cookies)
             soup = BeautifulSoup(r.text, "lxml")
             page_title = soup.select_one("title")
             if page_title and "登入" in page_title.get_text(strip=True):
@@ -570,8 +487,8 @@ def fetch_javdb(code):
             return fetch_javdb_detail(jid, code)
         except Exception:
             pass  # 详情页失败再回退到重新搜索
-    # 3) 兜底：直接解析搜索页
-    r = _get(f"{JAVDB_BASE}/search?q={code}&f=all&locale=zh-CN", cookies=cookies)
+    # 3) 兜底：直接解析搜索页（同样必须走浏览器指纹请求，理由同上）
+    r = _impersonate_get(f"{JAVDB_BASE}/search?q={code}&f=all&locale=zh-CN", cookies=cookies)
     return _parse_detail(r.text, code, JAVDB_BASE)
 
 
@@ -834,11 +751,30 @@ def download_cover(url, code):
 
 
 def scrape(code):
-    """对外主入口：并发抓两站，合并字段并下载封面。永不抛异常。"""
+    """对外主入口：并发抓启用站点，合并字段并下载封面。永不抛异常。
+
+    默认只启用 JavDB——凤凰城/美国机房出口实测（原生网络，无浏览器求解）：
+    JavBus/JavLibrary/MissAV 全被 Cloudflare 拦、DMM 地区锁、AVBase 无可用接口，
+    这些源每次刮削只会白等超时拖慢响应。需要时用环境变量 SCRAPER_SOURCES 开启，
+    如 SCRAPER_SOURCES=javdb,javbus,avbase,dmm,missav。
+    """
     code = (code or "").strip().upper()
     if not code:
         return {"code": "", "title": "", "actress": [], "actress_all": [], "release_date": "",
                 "cover_path": "", "source": "", "errors": ["编号不能为空"]}
+
+    all_sites = {
+        "javbus": fetch_javbus,
+        "javdb": fetch_javdb,
+        "avbase": fetch_avbase,
+        "dmm": fetch_dmm,
+        "missav": fetch_missav,
+    }
+    enabled = {s.strip().lower() for s in SCRAPER_SOURCES.split(",") if s.strip()}
+    unknown = enabled - set(all_sites)
+    enabled &= set(all_sites)
+    if not enabled:
+        enabled = {"javdb"}
 
     def run(site, fn):
         try:
@@ -847,14 +783,12 @@ def scrape(code):
             return site, None, str(exc)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
-        f1 = ex.submit(run, "javbus", fetch_javbus)
-        f2 = ex.submit(run, "javdb", fetch_javdb)
-        f3 = ex.submit(run, "avbase", fetch_avbase)
-        f4 = ex.submit(run, "dmm", fetch_dmm)
-        f5 = ex.submit(run, "missav", fetch_missav)
-        results = [f1.result(), f2.result(), f3.result(), f4.result(), f5.result()]
+        futs = [ex.submit(run, site, fn) for site, fn in all_sites.items() if site in enabled]
+        results = [f.result() for f in futs]
 
     merged = _merge(results)
+    if unknown:
+        merged["errors"].append(f"未知刮削源已忽略: {','.join(sorted(unknown))}")
     cover_path, cover_err = download_cover(merged["cover_url"], code)
     if cover_err:
         merged["errors"].append(f"封面: {cover_err}")
