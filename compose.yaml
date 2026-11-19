@@ -52,13 +52,12 @@ services:
       # 可选：JavDB 登录 Cookie（浏览器登录 javdb.com → F12 → Network 复制请求 Cookie 值）。
       # 配置后 JavDB 刮削可越过登录墙稳定可用；留空则遇登录墙时明确报错。
       JAVDB_COOKIES: ${JAVDB_COOKIES:-}
-      # FlareSolverr 地址，用于绕过 Cloudflare 人机验证（MissAV/JavBus 等 CF 站）。
-      # 默认指向下方内置的 flaresolverr 服务；若已在 NAS 等处跑了 FlareSolverr，
-      # 可改成它的地址（如 http://192.168.5.3:8191）；确认完全不需要时留空即禁用。
-      FLARESOLVERR_URL: ${FLARESOLVERR_URL:-http://flaresolverr:8191}
-      # FlareSolverr 单次求解超时（秒）与 clearance 缓存时长（秒），一般保持默认即可
-      FLARESOLVERR_TIMEOUT: ${FLARESOLVERR_TIMEOUT:-60}
-      FLARESOLVERR_CACHE_TTL: ${FLARESOLVERR_CACHE_TTL:-1800}
+      # TRAWL 地址，仅用于「刮削」时绕过 Cloudflare / Turnstile 等 JS 质询（MissAV 等 CF 站），
+      # 不影响网站访问与打开速度。默认指向下方内置的 trawl 服务；已有外部实例时改成
+      # 它的地址（如 http://192.168.5.3:8191）；确认完全不需要时留空即禁用。
+      TRAWL_URL: ${TRAWL_URL:-http://trawl:8191}
+      # TRAWL 单次求解超时（秒），一般保持默认即可
+      TRAWL_TIMEOUT: ${TRAWL_TIMEOUT:-60}
       # 容器内数据目录，与上面 volumes 的挂载目标一致，不要改动
       DATA_DIR: /app/data
       # 容器内监听端口，与 ports 右侧一致，不要改动
@@ -74,17 +73,31 @@ services:
       retries: 3
       start_period: 10s
 
-  # ---------- 内置 FlareSolverr（过 Cloudflare 盾）----------
-  # 官方镜像 ghcr.io/flaresolverr/flaresolverr:latest，与刮削服务同网络，
-  # javlib 通过 http://flaresolverr:8191 调用。若改用外部实例，可删掉本服务段
-  # 并把上面 FLARESOLVERR_URL 填成外部地址。
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: flaresolverr
-    restart: unless-stopped
+  # ---------- 内置 TRAWL（刮削过 Cloudflare / Turnstile 等 JS 质询）----------
+  # 镜像 ghcr.io/germondai/trawl:latest，与刮削服务同网络，javlib 通过
+  # http://trawl:8191 调用其原生 /scrape 接口。TRAWL 服务端自带 clearance
+  # 缓存与浏览器池，重复请求无需重新求解。改用外部实例时删掉本服务段并把
+  # 上面 TRAWL_URL 填成外部地址即可。
+  trawl:
+    image: ghcr.io/germondai/trawl:latest
+    container_name: trawl
+    restart: always
+    ports:
+      - "8191:8191"
+    shm_size: 1gb
+    # 资源限制：内存 1.5G，CPU 最高 0.3 核（约 30% 单核占用），避免挤占影片库服务
+    mem_limit: 1.5g
+    cpus: "0.3"
+    cap_add:
+      - SYS_ADMIN
     environment:
-      - LOG_LEVEL=info
-      - TZ=Asia/Shanghai
+      BROWSER_POOL_SIZE: 1
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://trawl:8191/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
 
 # 升级镜像：docker compose pull && docker compose up -d
 # 查看日志：docker logs -f javlib
