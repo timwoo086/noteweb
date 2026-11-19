@@ -4,6 +4,17 @@
 
 ---
 
+## v0.0.32 — 取消过盾程序，原生网络刮削（默认仅 JavDB）
+
+**提交**：`40f386e`
+
+- **彻底移除过盾组件**：删除 TRAWL 全部代码（scraper/config/compose），刮削不再依赖任何浏览器求解服务，compose 仅剩影片库单服务——**升级时需重新粘贴编排，已无 trawl 服务段**。
+- **刮削源实测收敛**：经美国凤凰城节点（机房出口）原生网络逐一实测——JavDB 可用（且必须用 curl_cffi chrome124 浏览器指纹，普通 requests 裸 TLS 会被 Cloudflare 直接拒连超时）；JavBus 403、MissAV CF 403、DMM 地区锁、JavLibrary 超时、AVBase 无可用接口。并行打不可用源只会白等超时拖慢每次刮削。
+- **新增 `SCRAPER_SOURCES` 环境变量**：逗号分隔配置启用源（可选 javdb/javbus/avbase/dmm/missav），**默认 `javdb`**；网络环境变化（如换出口）时可自行扩展，如 `SCRAPER_SOURCES=javdb,javbus`。
+- **JavDB 全链路改指纹请求**：详情页、搜索补 ID、兜底搜索三处全部改用 curl_cffi chrome124。
+- **新增 `SCRAPE_TIMEOUT`（默认 30s）**：指纹请求单独超时——JavDB 经代理/跨区链路单次可达 20s+，此前被 `REQUEST_TIMEOUT`(15s) 掐死后回退普通请求再白等 30s。实测 `scrape()` 单片总耗时 **46.9s → 4.7s**（节点出口；线上直连更快），标题/演员/日期/封面解析均正常。
+- `javdb_ids.json` 运行时缓存加入 .gitignore。
+
 ## v0.0.31 — 刮削过盾组件由 FlareSolverr 替换为 TRAWL
 
 **提交**：`f94628f`
