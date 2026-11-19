@@ -52,11 +52,12 @@ services:
       # 可选：JavDB 登录 Cookie（浏览器登录 javdb.com → F12 → Network 复制请求 Cookie 值）。
       # 配置后 JavDB 刮削可越过登录墙稳定可用；留空则遇登录墙时明确报错。
       JAVDB_COOKIES: ${JAVDB_COOKIES:-}
-      # 启用的刮削源（逗号分隔，可选 javdb/airav/carib/javbus/avbase/dmm/missav）。
-      # 默认 javdb,airav,carib：凤凰城出口实测原生可达，后两者作为 JavDB
-      # 限流/漏抓时的兜底；其余源被 CF 拦/地区锁/无接口，默认关闭避免白等。
-      # 升级 v0.0.33 后需在 1Panel 环境变量里同步修改此项（旧值为 javdb）。
-      SCRAPER_SOURCES: ${SCRAPER_SOURCES:-javdb,airav,carib}
+      # 启用的刮削源（逗号分隔，可选 javdb/javbus/airav/carib/avbase/dmm/missav）。
+      # 默认 javdb,javbus,airav,carib：凤凰城出口实测原生可达（前两者需指纹，
+      # JavBus 还需先访问首页建会话）。JavDB 连刮几个会触发限流，JavBus/airav
+      # 作为同番号的补充源；其余源被 CF 拦/地区锁/无接口，默认关闭避免白等。
+      # 注：javbus/airav/carib 在代码里是内置兜底，旧环境变量也照样生效。
+      SCRAPER_SOURCES: ${SCRAPER_SOURCES:-javdb,javbus,airav,carib}
       # 容器内数据目录，与上面 volumes 的挂载目标一致，不要改动
       DATA_DIR: /app/data
       # 容器内监听端口，与 ports 右侧一致，不要改动
