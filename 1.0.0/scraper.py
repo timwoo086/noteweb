@@ -31,6 +31,9 @@ JAVDB_BASE = "https://javdb.com"
 MISSAV_BASE = "https://missav123.com"
 AVBASE_BASE = "https://www.avbase.net"
 DMM_BASE = "https://www.dmm.co.jp"
+AIRAV_ROOT = "https://airav.io"              # 域名根，用于拼接详情页相对路径
+AIRAV_BASE = AIRAV_ROOT + "/cn"              # 中文站，简体标题/封面，凤凰城出口原生可达
+CARIB_BASE = "https://www.caribbeancom.com"  # 无码站，日文标题/演员/封面，原生可达
 
 # curl_cffi 可选：能模拟浏览器 TLS 指纹，过一部分 Cloudflare 拦截
 try:
@@ -626,6 +629,93 @@ def fetch_dmm(code):
     raise RuntimeError(" / ".join(errors) or "DMM 未找到有效数据")
 
 
+def fetch_airav(code):
+    """airav.io 中文站：搜索页按番号定位 → 详情页取简体标题/日期/封面。
+
+    凤凰城机房出口原生可达（无 Cloudflare 挑战），走指纹请求更稳。
+    该站演员名混在标题里而非独立链接，不主动猜演员，交由 javdb 等源提供。
+    """
+    r = _impersonate_get(f"{AIRAV_BASE}/search_result?kw={code}")
+    soup = BeautifulSoup(r.text, "lxml")
+    target = ""
+    fallback = ""
+    for card in soup.select("div.oneVideo"):
+        link = card.select_one('a[href*="/video?hid="]')
+        if not link:
+            continue
+        title_text = card.get_text(" ", strip=True)
+        # 番号需独立成词，避免相似编号误命中
+        if not re.search(r"(?<![A-Za-z0-9])" + re.escape(code) + r"(?![A-Za-z0-9])",
+                         title_text, re.I):
+            continue
+        # "无码流出"等衍生版本标题虽同但封面/编号不同，仅作兜底
+        if re.search(r"无码|無碼|流出|破解", title_text):
+            fallback = fallback or link.get("href", "")
+            continue
+        target = link.get("href", "")
+        break
+    target = target or fallback
+    if not target:
+        raise RuntimeError("airav 未找到匹配番号的结果")
+
+    s2 = BeautifulSoup(_impersonate_get(_abs_url(target, AIRAV_ROOT)).text, "lxml")
+    title = ""
+    og = s2.select_one('meta[property="og:title"]')
+    if og and og.get("content"):
+        title = re.sub(r"\s*-\s*airav\.io\s*$", "", og["content"].strip(), flags=re.I)
+        title = re.sub(r"^\s*" + re.escape(code) + r"\s*", "", title, flags=re.I).strip()
+    cover = _extract_cover_url(s2, AIRAV_BASE)
+    # 日期在 div.video-item 的时钟图标旁（形如 "2020-01-09 00:00:00"）
+    date = ""
+    clock = s2.select_one("div.video-item .fa-clock")
+    if clock and clock.parent:
+        m = DATE_RE.search(clock.parent.get_text(" ", strip=True))
+        if m:
+            date = f"{m.group(1)}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
+    if not (title or cover or date):
+        raise RuntimeError("airav 详情页无有效字段")
+    return {"title": title, "actress": [], "release_date": date, "cover_url": cover}
+
+
+def fetch_carib(code):
+    """caribbeancom 无码站：番号直达详情页，取日文标题/演员/封面。
+
+    番号格式为 MMDDYY-NNN（如 010615-776），非该格式快速跳过；
+    页面编码 EUC-JP，需手动解码。凤凰城出口原生可达。
+    """
+    if not re.fullmatch(r"\d{6}-\d{2,4}", code, re.I):
+        raise RuntimeError("非 carib 番号格式，跳过")
+    r = _impersonate_get(f"{CARIB_BASE}/moviepages/{code}/index.html")
+    if r.status_code != 200:
+        raise RuntimeError(f"carib 返回 HTTP {r.status_code}")
+    soup = BeautifulSoup(r.content.decode("euc-jp", "replace"), "lxml")
+    title = _text(soup.select_one("h1[itemprop='name']"))
+    actress = []
+    for li in soup.select("li.movie-spec"):
+        st = li.select_one(".spec-title")
+        if st and "出演" in st.get_text():
+            actress = [a.get_text(" ", strip=True) for a in li.select('a[itemprop="actor"]')
+                       if a.get_text(strip=True)]
+            break
+    # 优先取画廊大图（/images/l/），否则取缩略图
+    cover = ""
+    big = soup.select_one(f'a[href*="/moviepages/{code}/images/l/"]')
+    if big:
+        cover = _abs_url(big.get("href", ""), CARIB_BASE)
+    if not cover:
+        th = soup.select_one('img[itemprop="thumbnail"]')
+        if th:
+            cover = _abs_url(th.get("src") or th.get("data-src") or "", CARIB_BASE)
+    # 番号前六位即 MMDDYY，可推出发行日期
+    date = ""
+    mm, dd, yy = int(code[:2]), int(code[2:4]), int(code[4:6])
+    if 1 <= mm <= 12 and 1 <= dd <= 31:
+        date = f"20{yy:02d}-{mm:02d}-{dd:02d}"
+    if not (title or actress or cover):
+        raise RuntimeError("carib 详情页无有效字段")
+    return {"title": title, "actress": actress[:6], "release_date": date, "cover_url": cover}
+
+
 def _is_chinese_name(name):
     """名字里含汉字（CJK 统一表意文字）视为中文名，优先级高于假名/罗马字。"""
     return any("\u4e00" <= ch <= "\u9fff" for ch in (name or ""))
@@ -660,7 +750,7 @@ def _merge(results):
         chinese = [n for n in names if _is_chinese_name(n)]
         return chinese or names
 
-    for site in ("javdb", "missav", "avbase", "dmm", "javbus"):
+    for site in ("javdb", "missav", "avbase", "carib", "dmm", "javbus"):
         names = [to_chinese(a) for a in by_site.get(site, {}).get("actress", [])]
         if names:
             merged["actress"] = preferred_names(names)
@@ -673,9 +763,10 @@ def _merge(results):
                 return value
         return ""
 
-    merged["title"] = first("title", ("javdb", "missav", "avbase", "dmm", "javbus"))
-    merged["release_date"] = first("release_date", ("avbase", "javdb", "missav", "dmm", "javbus"))
-    merged["cover_url"] = first("cover_url", ("javdb", "missav", "javbus", "avbase", "dmm"))
+    # airav 的简体标题优先于日文站，但 javdb（zh-CN）仍为第一主源
+    merged["title"] = first("title", ("javdb", "airav", "missav", "avbase", "carib", "dmm", "javbus"))
+    merged["release_date"] = first("release_date", ("javdb", "airav", "avbase", "carib", "missav", "dmm", "javbus"))
+    merged["cover_url"] = first("cover_url", ("javdb", "airav", "missav", "javbus", "carib", "avbase", "dmm"))
     return merged
 
 
@@ -714,8 +805,12 @@ def download_cover(url, code):
         referers.append(MISSAV_BASE + "/")
     if "pics.dmm" in url or "dmm.co" in url or "avbase" in url:
         referers.append(DMM_BASE + "/")
+    if "airav" in url:
+        referers.append(AIRAV_BASE + "/")
+    if "caribbeancom" in url:
+        referers.append(CARIB_BASE + "/")
     # 兜底：几个站都试
-    for ref in (JAVBUS_BASE + "/", MISSAV_BASE + "/", JAVDB_BASE + "/"):
+    for ref in (JAVBUS_BASE + "/", MISSAV_BASE + "/", JAVDB_BASE + "/", AIRAV_BASE + "/"):
         if ref not in referers:
             referers.append(ref)
 
@@ -753,10 +848,11 @@ def download_cover(url, code):
 def scrape(code):
     """对外主入口：并发抓启用站点，合并字段并下载封面。永不抛异常。
 
-    默认只启用 JavDB——凤凰城/美国机房出口实测（原生网络，无浏览器求解）：
-    JavBus/JavLibrary/MissAV 全被 Cloudflare 拦、DMM 地区锁、AVBase 无可用接口，
-    这些源每次刮削只会白等超时拖慢响应。需要时用环境变量 SCRAPER_SOURCES 开启，
-    如 SCRAPER_SOURCES=javdb,javbus,avbase,dmm,missav。
+    默认启用 javdb,airav,carib——凤凰城出口实测（原生网络，无过盾）：
+    JavDB 需 curl_cffi 指纹；airav.io/cn（简体标题/封面）、caribbeancom（无码，
+    日文标题/演员）原生可达，作为 JavDB 限流/漏抓时的兜底。其余源
+    JavBus/JavLibrary/MissAV 被 CF 拦、DMM 地区锁、AVBase 无接口，默认关闭，
+    需要时用 SCRAPER_SOURCES=javdb,javbus,avbase,dmm,missav 开启。
     """
     code = (code or "").strip().upper()
     if not code:
@@ -769,12 +865,17 @@ def scrape(code):
         "avbase": fetch_avbase,
         "dmm": fetch_dmm,
         "missav": fetch_missav,
+        "airav": fetch_airav,
+        "carib": fetch_carib,
     }
     enabled = {s.strip().lower() for s in SCRAPER_SOURCES.split(",") if s.strip()}
     unknown = enabled - set(all_sites)
     enabled &= set(all_sites)
     if not enabled:
         enabled = {"javdb"}
+    # airav/carib 为内置兜底源：即便旧部署的环境变量仍是 SCRAPER_SOURCES=javdb，
+    # 也能在 JavDB 限流/漏抓时补上中文标题与封面（两者非匹配番号会秒退，不拖慢）。
+    enabled |= {"airav", "carib"}
 
     def run(site, fn):
         try:
@@ -782,7 +883,7 @@ def scrape(code):
         except Exception as exc:  # noqa: BLE001
             return site, None, str(exc)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=7) as ex:
         futs = [ex.submit(run, site, fn) for site, fn in all_sites.items() if site in enabled]
         results = [f.result() for f in futs]
 
