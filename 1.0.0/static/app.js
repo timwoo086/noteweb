@@ -6,6 +6,7 @@ let currentCategory = 'FT.A.V';
 let editingId = null;
 let lastScrapedCover = '';
 let lastScrapedCoverUrl = '';
+let lastScrapedSource = '';
 let actressOptions = [];
 const isAdmin = document.body.dataset.isAdmin === '1';
 let lastDate = document.body.dataset.lastDate || '';
@@ -479,10 +480,12 @@ function openModal(id = null) {
   editingId = id;
   lastScrapedCover = '';
   lastScrapedCoverUrl = '';
+  lastScrapedSource = '';
   $('modalTitle').textContent = id ? '编辑影片' : '录入影片';
   $('fetchStatus').hidden = true;
   $('preview').hidden = true;
-  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fFramerate','fJavdbId','fNote'].forEach(i => $(i).value = '');
+  $('previewCover').removeAttribute('src');
+  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fFramerate','fNote'].forEach(i => $(i).value = '');
   renderDownloadRows([]);
   $('fCategory').value = currentCategory === 'LTX破解' ? 'LTX破解' : 'FT.A.V';
   $('fRes4K').checked = false;
@@ -512,11 +515,11 @@ function openModal(id = null) {
       $('fBluray').checked = !!m.is_bluray;
       $('fRemux').checked = !!m.is_remux;
       renderDownloadRows(m.download_urls && m.download_urls.length ? m.download_urls : [m.download_url || '']);
-      $('fJavdbId').value = m.javdb_id || '';
       $('fCategory').value = m.category || 'FT.A.V';
       $('fNote').value = m.note || '';
       lastScrapedCover = m.cover_path || '';
       lastScrapedCoverUrl = m.cover_url || '';
+      lastScrapedSource = m.source || '';
       if (m.cover_path || m.cover_url) showPreview(m);
       loadCandidatesForCurrentActress();
     });
@@ -528,16 +531,18 @@ function openModal(id = null) {
 function closeModal() { const el = $('modal'); if (el) el.hidden = true; }
 
 function showPreview(data) {
+  const cover = $('previewCover');
   if (data.cover_path) {
-    $('previewCover').src = '/covers/' + encodeURIComponent(data.cover_path) + '?t=' + Date.now();
-    $('previewCover').removeAttribute('referrerpolicy');
-    $('previewCover').style.display = '';
+    cover.src = '/covers/' + encodeURIComponent(data.cover_path) + '?t=' + Date.now();
+    cover.removeAttribute('referrerpolicy');
   } else if (data.cover_url) {
-    $('previewCover').src = data.cover_url;
-    $('previewCover').setAttribute('referrerpolicy', 'no-referrer');
-    $('previewCover').style.display = '';
+    cover.src = data.cover_url;
+    cover.setAttribute('referrerpolicy', 'no-referrer');
   } else {
-    $('previewCover').style.display = 'none';
+    // 没有封面就整块隐藏，并清空 src，避免残留上一次抓取的图片
+    cover.removeAttribute('src');
+    $('preview').hidden = true;
+    return;
   }
   $('previewTitle').textContent = data.title || '（未抓到标题）';
   const parts = [];
@@ -613,13 +618,12 @@ async function doFetch() {
   const status = $('fetchStatus');
   status.hidden = false;
   status.classList.remove('error');
-  status.textContent = '正在抓取两个站点…';
+  status.textContent = '正在抓取…';
   $('fetchBtn').disabled = true;
 
-  const jid = $('fJavdbId') ? $('fJavdbId').value.trim() : '';
   const res = await api('/api/scrape', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(jid ? {code, javdb_id: jid} : {code})
+    body: JSON.stringify({code})
   });
   $('fetchBtn').disabled = false;
   if (!res || !res.ok) { status.textContent = '抓取请求失败'; status.classList.add('error'); return; }
@@ -634,13 +638,14 @@ async function doFetch() {
   $('fRelease').value = d.release_date || '';
   lastScrapedCover = d.cover_path || '';
   lastScrapedCoverUrl = d.cover_url || '';
+  lastScrapedSource = d.source || '';
   showPreview(d);
 
   const filled = [d.title && '标题', d.actress?.length && '演员', d.release_date && '发行时间'].filter(Boolean);
   const errs = (d.errors || []).length ? '（' + d.errors.join('；') + '）' : '';
   status.textContent = filled.length
     ? `已抓取：${filled.join('、')}${errs}。请核对并补录左侧字段。`
-    : `两站均未抓到信息${errs}，请手动填写。`;
+    : `未抓到信息${errs}，请手动填写。`;
   if (!filled.length) status.classList.add('error');
 }
 
@@ -657,12 +662,11 @@ async function saveMovie() {
     is_bluray: $('fBluray').checked ? 1 : 0,
     is_remux: $('fRemux').checked ? 1 : 0,
     download_urls: collectDownloads(),
-    javdb_id: $('fJavdbId').value.trim(),
     category: $('fCategory').value,
     note: $('fNote').value.trim(),
     cover_path: lastScrapedCover,
     cover_url: lastScrapedCoverUrl,
-    source: $('fetchStatus').textContent.includes('已抓取') ? 'javbus/javdb' : 'manual'
+    source: $('fetchStatus').textContent.includes('已抓取') ? (lastScrapedSource || 'scrape') : 'manual'
   };
   if (!payload.code) { toast('编号不能为空'); return; }
   const url = editingId ? '/api/movies/' + editingId : '/api/movies';
