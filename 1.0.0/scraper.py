@@ -226,6 +226,18 @@ def _extract_date(soup):
 
 
 def _extract_actress(soup):
+    # JavDB 在演员块里用 class="actor-female" 标注女演员，男演员/导演没有此 class。
+    # 只要页面存在该标注，就只取女演员——导演与男演员直接排除（如 SONE-280 的
+    # 白上咲花是女演员，貞松大輔/黒田悠斗/松本ケン 等是导演或男演员）。
+    females = soup.select("a.actor-female")
+    if females:
+        names = []
+        for a in females:
+            name = to_chinese(_text(a))
+            if name and name not in names:
+                names.append(name)
+        return names
+
     names = []
     for sel in ACTRESS_SELECTORS:
         for a in soup.select(sel):
@@ -326,8 +338,26 @@ def _parse_detail(html, code, base):
 
 
 def fetch_javbus(code):
-    # 带上站内 Referer，部分 CDN/WAF 会校验来源
-    r = _get(f"{JAVBUS_BASE}/{code}", extra_headers={"Referer": JAVBUS_BASE + "/"})
+    """JavBus 详情页：先访问首页建立会话 cookie，再抓详情（机房出口直连会 403）。
+
+    实测凤凰城出口下必须先 GET 首页拿到 cookie 再带 Referer 访问详情页，
+    直接打详情页会被 Cloudflare 挡成 403；指纹请求 + 会话即可稳定 200。
+    JavBus 演员在 /star/ 链接、导演在 /director/ 链接，天然不会混入导演。
+    """
+    if _creq is None:
+        # 无 curl_cffi 时退回普通请求（机房出口大概率被挡，但本地直连可用）
+        r = _get(f"{JAVBUS_BASE}/{code}", extra_headers={"Referer": JAVBUS_BASE + "/"})
+        return _parse_detail(r.text, code, JAVBUS_BASE)
+    s = _creq.Session(impersonate="chrome124")
+    headers = {"Accept-Language": "zh-CN,zh;q=0.9,ja;q=0.8"}
+    proxies = _proxies() or None
+    s.get(JAVBUS_BASE + "/", timeout=SCRAPE_TIMEOUT, headers=headers, proxies=proxies)
+    r = s.get(
+        f"{JAVBUS_BASE}/{code}", timeout=SCRAPE_TIMEOUT, headers=headers,
+        proxies=proxies, allow_redirects=True,
+    )
+    if r.status_code != 200 or "Attention Required" in r.text[:2000]:
+        raise RuntimeError(f"JavBus 抓取失败（HTTP {r.status_code}，可能被 CF 拦截）")
     return _parse_detail(r.text, code, JAVBUS_BASE)
 
 
@@ -848,11 +878,11 @@ def download_cover(url, code):
 def scrape(code):
     """对外主入口：并发抓启用站点，合并字段并下载封面。永不抛异常。
 
-    默认启用 javdb,airav,carib——凤凰城出口实测（原生网络，无过盾）：
-    JavDB 需 curl_cffi 指纹；airav.io/cn（简体标题/封面）、caribbeancom（无码，
-    日文标题/演员）原生可达，作为 JavDB 限流/漏抓时的兜底。其余源
-    JavBus/JavLibrary/MissAV 被 CF 拦、DMM 地区锁、AVBase 无接口，默认关闭，
-    需要时用 SCRAPER_SOURCES=javdb,javbus,avbase,dmm,missav 开启。
+    默认启用 javdb,javbus,airav,carib——凤凰城出口实测（原生网络，无过盾）：
+    JavDB/JavBus 需 curl_cffi 指纹（JavBus 另需先访问首页建立会话）；
+    airav.io/cn（简体标题/封面）、caribbeancom（无码，日文标题/演员）原生可达。
+    JavDB 连续刮几个会触发登录墙，JavBus/airav 作为同番号的补充源。
+    其余源 JavLibrary/MissAV 被 CF 拦、DMM 地区锁、AVBase 无接口，默认关闭。
     """
     code = (code or "").strip().upper()
     if not code:
@@ -873,9 +903,9 @@ def scrape(code):
     enabled &= set(all_sites)
     if not enabled:
         enabled = {"javdb"}
-    # airav/carib 为内置兜底源：即便旧部署的环境变量仍是 SCRAPER_SOURCES=javdb，
-    # 也能在 JavDB 限流/漏抓时补上中文标题与封面（两者非匹配番号会秒退，不拖慢）。
-    enabled |= {"airav", "carib"}
+    # javbus/airav/carib 为内置兜底源：即便旧部署的环境变量仍是 SCRAPER_SOURCES=javdb，
+    # 也能在 JavDB 连续刮几个触发限流时补上标题/演员/封面（carib 非匹配番号会秒退）。
+    enabled |= {"javbus", "airav", "carib"}
 
     def run(site, fn):
         try:
