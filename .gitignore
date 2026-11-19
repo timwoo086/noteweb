@@ -10,3 +10,4 @@ venv/
 !1.0.0/data/covers/.gitkeep
 *.log
 .DS_Store
+1.0.0/data/javdb_ids.json
