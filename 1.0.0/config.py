@@ -17,6 +17,9 @@ PORT = int(os.environ.get("PORT", "5000"))
 # 抓取超时（秒）与并发两站时的重试次数
 REQUEST_TIMEOUT = int(os.environ.get("REQUEST_TIMEOUT", "15"))
 RETRY = int(os.environ.get("RETRY", "2"))
+# 浏览器指纹请求（curl_cffi）单独的超时：JavDB 经代理/跨区链路单次可达 20s+，
+# 用 REQUEST_TIMEOUT(15s) 会掐死本可成功的请求，随后回退普通请求再白等 30s。
+SCRAPE_TIMEOUT = int(os.environ.get("SCRAPE_TIMEOUT", "30"))
 
 # 可选代理：配置项写在这里即可（如 http://127.0.0.1:7897），留空表示直连。
 # 目标机器可直连两个站点，保持 "" 即可。
@@ -30,13 +33,9 @@ JAVDB_COOKIES = os.environ.get("JAVDB_COOKIES", "")
 # 成功刮过的番号记下 ID 后，下次直接走详情页，绕开搜索墙。存在挂载卷内，升级不丢。
 JAVDB_IDS_PATH = os.path.join(DATA_DIR, "javdb_ids.json")
 
-# TRAWL（可选）：仅用于「刮削」时绕过 Cloudflare / Turnstile 等 JS 质询与验证码。
-# 调用全部封装在 scraper.py，只有 /api/scrape 抓取外部站点才会触发；网站访问
-# （首页/列表/详情/封面/复制等）完全不经过它，不影响页面打开速度。
-# 留空表示不启用；compose 默认内置 TRAWL 服务（ghcr.io/germondai/trawl，地址
-# http://trawl:8191），抓取被挑战页拦截时自动改走 TRAWL 的 POST /scrape 求解。
-TRAWL_URL = os.environ.get("TRAWL_URL", "").rstrip("/")
-# TRAWL 单次求解超时（秒）；clearance 缓存与浏览器会话复用由 TRAWL 服务端处理
-TRAWL_TIMEOUT = int(os.environ.get("TRAWL_TIMEOUT", "60"))
+# 启用的刮削源（逗号分隔，可选 javdb/javbus/avbase/dmm/missav）。
+# 默认仅 javdb：凤凰城/美国机房出口实测（原生网络，无任何浏览器过盾）下其余源
+# 全部被 Cloudflare 拦截/地区锁/无可用接口，并行只会白等超时拖慢每次刮削。
+SCRAPER_SOURCES = os.environ.get("SCRAPER_SOURCES", "javdb")
 
 os.makedirs(COVER_DIR, exist_ok=True)
