@@ -4,6 +4,15 @@
 
 ---
 
+## v0.0.34 — 刮削只保留女演员 + javbus 作为 JavDB 限流补充源
+
+**提交**：`0ddd790`
+
+- **演员只保留女演员**：JavDB 在演员块里用 `class="actor-female"` 标注女演员，男演员与导演没有此标记。抓取时只取带该标记的名字——导演（贞松大辅、黒田悠斗、松本ケン 等）和男演员直接移除。实测 SONE-280 的演员从 5 人（白上咲花 + 4 位导演/男演员）降到只剩「白上咲花」。
+- **javbus 源启用**：实测凤凰城出口下 javbus 可用，但必须先访问首页建立会话 cookie、再带指纹请求抓详情页（直连详情页会被 Cloudflare 挡成 403）。改用 curl_cffi 会话方案后 0.4s 拿到标题/演员/日期/封面；JavBus 演员在 `/star/`、导演在 `/director/`，不会混入导演。
+- **缓解 JavDB 限流**：JavDB 连续刮几个会触发登录墙，javbus/airav 作为同番号的补充源内置始终启用（旧环境变量也生效）。实测连续刮 6 个番号全部成功，其中 3 个 JavDB 限流的由 javbus/airav 补上标题与演员。
+- 默认 `SCRAPER_SOURCES` 改为 `javdb,javbus,airav,carib`，compose 同步。
+
 ## v0.0.33 — 接入 airav/carib 兜底刮削源 + 编辑弹窗优化
 
 **提交**：`9abd6df`
