@@ -33,9 +33,10 @@ JAVDB_COOKIES = os.environ.get("JAVDB_COOKIES", "")
 # 成功刮过的番号记下 ID 后，下次直接走详情页，绕开搜索墙。存在挂载卷内，升级不丢。
 JAVDB_IDS_PATH = os.path.join(DATA_DIR, "javdb_ids.json")
 
-# 启用的刮削源（逗号分隔，可选 javdb/javbus/avbase/dmm/missav）。
-# 默认仅 javdb：凤凰城/美国机房出口实测（原生网络，无任何浏览器过盾）下其余源
-# 全部被 Cloudflare 拦截/地区锁/无可用接口，并行只会白等超时拖慢每次刮削。
-SCRAPER_SOURCES = os.environ.get("SCRAPER_SOURCES", "javdb")
+# 启用的刮削源（逗号分隔，可选 javdb/airav/carib/javbus/avbase/dmm/missav）。
+# 默认 javdb,airav,carib：凤凰城出口实测（原生网络，无过盾）——JavDB 需指纹，
+# airav.io/cn（简体标题/封面）与 caribbeancom（无码，日文标题/演员）原生可达，
+# 作为兜底；其余源被 CF 拦/地区锁/无接口，默认关闭避免白等。
+SCRAPER_SOURCES = os.environ.get("SCRAPER_SOURCES", "javdb,airav,carib")
 
 os.makedirs(COVER_DIR, exist_ok=True)
