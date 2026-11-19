@@ -30,13 +30,13 @@ JAVDB_COOKIES = os.environ.get("JAVDB_COOKIES", "")
 # 成功刮过的番号记下 ID 后，下次直接走详情页，绕开搜索墙。存在挂载卷内，升级不丢。
 JAVDB_IDS_PATH = os.path.join(DATA_DIR, "javdb_ids.json")
 
-# FlareSolverr（可选）：用于绕过 Cloudflare 人机验证 / JS Challenge。
-# 留空表示不启用；填入 FlareSolverr 服务地址（如 http://flaresolverr:8191 或
-# http://192.168.5.3:8191）后，正常抓取被 CF 挑战页拦截时会自动改走它求解，
-# 拿回真实页面与 cf_clearance cookie。对 MissAV / JavBus 等 CF 站有用。
-FLARESOLVERR_URL = os.environ.get("FLARESOLVERR_URL", "").rstrip("/")
-# FlareSolverr 求解较耗时，默认超时与缓存时长（秒）
-FLARESOLVERR_TIMEOUT = int(os.environ.get("FLARESOLVERR_TIMEOUT", "60"))
-FLARESOLVERR_CACHE_TTL = int(os.environ.get("FLARESOLVERR_CACHE_TTL", "1800"))
+# TRAWL（可选）：仅用于「刮削」时绕过 Cloudflare / Turnstile 等 JS 质询与验证码。
+# 调用全部封装在 scraper.py，只有 /api/scrape 抓取外部站点才会触发；网站访问
+# （首页/列表/详情/封面/复制等）完全不经过它，不影响页面打开速度。
+# 留空表示不启用；compose 默认内置 TRAWL 服务（ghcr.io/germondai/trawl，地址
+# http://trawl:8191），抓取被挑战页拦截时自动改走 TRAWL 的 POST /scrape 求解。
+TRAWL_URL = os.environ.get("TRAWL_URL", "").rstrip("/")
+# TRAWL 单次求解超时（秒）；clearance 缓存与浏览器会话复用由 TRAWL 服务端处理
+TRAWL_TIMEOUT = int(os.environ.get("TRAWL_TIMEOUT", "60"))
 
 os.makedirs(COVER_DIR, exist_ok=True)
