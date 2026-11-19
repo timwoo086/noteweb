@@ -17,8 +17,6 @@ import concurrent.futures
 import json
 import os
 import re
-import time
-from urllib.parse import urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -26,7 +24,7 @@ from bs4 import BeautifulSoup
 from config import (
     COVER_DIR, HTTP_PROXY, JAVDB_COOKIES, JAVDB_IDS_PATH,
     REQUEST_TIMEOUT, RETRY,
-    FLARESOLVERR_URL, FLARESOLVERR_TIMEOUT, FLARESOLVERR_CACHE_TTL,
+    TRAWL_URL, TRAWL_TIMEOUT,
 )
 
 JAVBUS_BASE = "https://www.javbus.com"
@@ -160,94 +158,65 @@ def _is_cf_challenge(resp):
     return False
 
 
-# FlareSolverr 会话与 clearance 缓存：同一域名求解一次后可复用 cookie，避免频繁触发验证
-_fs_session_id = ""
-_fs_clearance = {}   # domain -> {"cookies": [...], "ua": str, "ts": float}
-_fs_lock = __import__("threading").Lock()
+# TRAWL 求解：TRAWL 服务端自带 clearance 缓存与浏览器池（/scrape 原生接口），
+# 客户端无需维护 session，重复请求由服务端复用已验证的会话快速返回
+def _trawl_solve(url):
+    """调用 TRAWL 原生接口求解被 Cloudflare/Turnstile 等拦截的页面。
 
-
-def _fs_solve(url):
-    """调用 FlareSolverr 求解 Cloudflare 挑战，返回 (html, cookies_dict, user_agent)。
-
-    未配置 FLARESOLVERR_URL 或求解失败时返回 None。
+    返回 (html, cookies_dict, user_agent)；未配置 TRAWL_URL 或求解失败时返回 None。
     """
-    if not FLARESOLVERR_URL:
+    if not TRAWL_URL:
         return None
-    global _fs_session_id
     try:
-        with _fs_lock:
-            if not _fs_session_id:
-                r = requests.post(
-                    FLARESOLVERR_URL + "/v1",
-                    json={"cmd": "sessions.create", "session": "noteweb"},
-                    timeout=20, proxies=_proxies(),
-                )
-                data = r.json() if r.ok else {}
-                # 已存在时直接复用
-                sid = data.get("session") or "noteweb"
-                _fs_session_id = sid
-            payload = {
-                "cmd": "request.get", "url": url,
-                "maxTimeout": FLARESOLVERR_TIMEOUT * 1000,
-                "session": _fs_session_id,
-            }
-        r = requests.post(FLARESOLVERR_URL + "/v1", json=payload,
-                          timeout=FLARESOLVERR_TIMEOUT + 15, proxies=_proxies())
+        r = requests.post(
+            TRAWL_URL + "/scrape",
+            json={
+                "url": url,
+                "solveEmbeddedCaptchas": False,   # 只需页面内容，不解表单验证码
+                "maxTimeout": TRAWL_TIMEOUT * 1000,
+            },
+            timeout=TRAWL_TIMEOUT + 15, proxies=_proxies(),
+        )
         if not r.ok:
             return None
         data = r.json()
-        if data.get("status") != "ok" or not data.get("solution"):
+        html = data.get("html") or ""
+        if not html:
             return None
-        sol = data["solution"]
-        cookies = {}
-        for c in sol.get("cookies") or []:
-            if c.get("name"):
-                cookies[c["name"]] = c.get("value", "")
-        return sol.get("response") or "", cookies, sol.get("userAgent") or ""
+        cookies = {
+            c.get("name"): c.get("value", "")
+            for c in data.get("cookies") or [] if c.get("name")
+        }
+        return html, cookies, data.get("userAgent") or ""
     except Exception:
         # 求解失败不影响原流程，由调用方按原样报错
         return None
 
 
-def _flaresolverr_get(url, cookies=None):
-    """通过 FlareSolverr 拿页面；命中缓存的 clearance 时直接复用其 cookie。
+class _SimpleResp:
+    """TRAWL 求解结果的轻量响应对象，兼容现有解析逻辑用到的属性。"""
 
-    返回类 requests.Response 的轻量对象（含 text/status_code/url），供现有解析逻辑使用。
-    """
-    if not FLARESOLVERR_URL:
-        return None
-    domain = (urlparse(url).hostname or "").lower()
-    now = time.time()
-    cached = _fs_clearance.get(domain)
-    use_cookies = dict(cookies or {})
-    ua = None
-    if cached and now - cached["ts"] < FLARESOLVERR_CACHE_TTL:
-        use_cookies.update(cached["cookies"])
-        ua = cached["ua"]
+    def __init__(self, _text, _url):
+        self.status_code = 200
+        self.text = _text
+        self.url = _url
+        self.headers = {}
 
-    solved = _fs_solve(url)
+
+def _trawl_get(url, cookies=None):
+    """通过 TRAWL 拿页面，返回类 requests.Response 的轻量对象；失败返回 None。"""
+    solved = _trawl_solve(url)
     if solved is None:
         return None
-    html, fs_cookies, fs_ua = solved
-    if fs_cookies:
-        use_cookies.update(fs_cookies)
-        _fs_clearance[domain] = {"cookies": fs_cookies, "ua": fs_ua, "ts": now}
-
-    class _Resp:
-        def __init__(self, _text, _url):
-            self.status_code = 200
-            self.text = _text
-            self.url = _url
-            self.headers = {}
-
-    return _Resp(html, url)
+    html, _cookies, _ua = solved
+    return _SimpleResp(html, url)
 
 
 def _impersonate_get(url, cookies=None):
     """带浏览器 TLS 指纹的 GET（curl_cffi），用于有 Cloudflare 的站点。
 
     curl_cffi 缺失或代理协议不兼容时回退到普通 requests；
-    若返回结果仍是 CF 挑战页，且配置了 FlareSolverr，则自动改走 FlareSolverr 求解。
+    若返回结果仍是 CF 挑战页，且配置了 TRAWL，则自动改走 TRAWL 求解。
     """
     resp = None
     if _creq is not None:
@@ -267,9 +236,9 @@ def _impersonate_get(url, cookies=None):
         resp = _get(url, cookies=cookies)
 
     if _is_cf_challenge(resp):
-        fs = _flaresolverr_get(url, cookies=cookies)
-        if fs is not None:
-            return fs
+        tr = _trawl_get(url, cookies=cookies)
+        if tr is not None:
+            return tr
     return resp
 
 
@@ -284,21 +253,21 @@ def _get(url, cookies=None, extra_headers=None):
                 url, headers=headers, timeout=REQUEST_TIMEOUT,
                 proxies=_proxies(), allow_redirects=True, cookies=cookies,
             )
-            # CF 挑战页（403/503 等）先不抛，交给下面的 FlareSolverr 判断
+            # CF 挑战页（403/503 等）先不抛，交给下面的 TRAWL 判断
             if _is_cf_challenge(r):
-                fs = _flaresolverr_get(url, cookies=cookies)
-                if fs is not None:
-                    return fs
+                tr = _trawl_get(url, cookies=cookies)
+                if tr is not None:
+                    return tr
             r.raise_for_status()
             return r
         except Exception as exc:  # noqa: BLE001 - 站点异常多样，统一兜底
             last = exc
-            # 4xx/5xx 的 HTTPError 里带响应，若正是 CF 挑战页则走 FlareSolverr
+            # 4xx/5xx 的 HTTPError 里带响应，若正是 CF 挑战页则走 TRAWL
             resp = getattr(exc, "response", None)
             if _is_cf_challenge(resp):
-                fs = _flaresolverr_get(url, cookies=cookies)
-                if fs is not None:
-                    return fs
+                tr = _trawl_get(url, cookies=cookies)
+                if tr is not None:
+                    return tr
     raise last
 
 
