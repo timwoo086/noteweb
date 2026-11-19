@@ -4,6 +4,15 @@
 
 ---
 
+## v0.0.31 — 刮削过盾组件由 FlareSolverr 替换为 TRAWL
+
+**提交**：`f94628f`
+
+- **刮削过盾组件替换**：取消 FlareSolverr，改为 TRAWL（`ghcr.io/germondai/trawl:latest`）——自托管抓取引擎，绕过 Cloudflare、Turnstile、reCAPTCHA、hCaptcha 等 JS 质询与验证码，可视为 FlareSolverr 的升级替代（官方称重复请求快 2~6 倍）。
+- **改用 TRAWL 原生接口**：`scraper.py` 撞 CF/挑战页时调用 TRAWL 的 `POST /scrape`（传 `url` + `solveEmbeddedCaptchas: false`），拿回 `html/cookies/userAgent`；不再需要创建/维护 session——TRAWL 服务端自带 clearance 缓存与浏览器池，重复请求自动复用已验证会话。`_get` 与 `_impersonate_get`（curl_cffi 指纹请求）两条链路都接入。
+- **配置改名**：环境变量 `FLARESOLVERR_URL/TIMEOUT/CACHE_TTL` → `TRAWL_URL/TRAWL_TIMEOUT`（默认 `http://trawl:8191`，留空禁用）；客户端侧 cookie 缓存删除，由服务端统一处理。仍仅用于刮削（`/api/scrape`），网站访问路径零触发。
+- **compose 更新**：内置服务由 flaresolverr 替换为 trawl（`shm_size 1gb`、`mem_limit 1.5g`、`SYS_ADMIN`、`BROWSER_POOL_SIZE=1`、healthcheck `/health`），并**限制 CPU 使用不超过 0.3 核（约 30%）**，避免浏览器求解挤占影片库服务资源。
+
 ## v0.0.30 — 录入时间支持显式留空（批量导入用）
 
 **提交**：`f3ff024`
