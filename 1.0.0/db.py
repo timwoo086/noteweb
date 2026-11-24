@@ -61,13 +61,80 @@ def connect():
     return conn
 
 
+def _migrate_code_unique_per_category(conn):
+    """把 movies 的「code 全局唯一」改成「(code, category) 复合唯一」。
+
+    FT.A.V 与 LTX破解 的番号各自独立，同一番号允许在两个栏目各存在一条；
+    同一栏目内仍保持唯一（洗版追加 -R2 的后备逻辑不变）。SQLite 无法直接改
+    列约束，需重建表；保留所有列/数据/id 与自增序列。旧库只迁移一次。
+    """
+    idxs = conn.execute("PRAGMA index_list(movies)").fetchall()
+    # 找出「仅包含 code 列」的唯一索引（新库是 (code, category) 两列，不匹配）
+    single_code_unique = False
+    for idx in idxs:
+        if idx[2] != 1:  # 非唯一索引
+            continue
+        info = conn.execute(f'PRAGMA index_info("{idx[1]}")').fetchall()
+        if len(info) == 1 and info[0][2] == "code":
+            single_code_unique = True
+            break
+    if not single_code_unique:
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE movies_new (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                code          TEXT NOT NULL,
+                title         TEXT NOT NULL DEFAULT '',
+                actress       TEXT NOT NULL DEFAULT '[]',
+                release_date  TEXT NOT NULL DEFAULT '',
+                added_at      TEXT NOT NULL DEFAULT '',
+                resolution    TEXT NOT NULL DEFAULT '',
+                is_original   INTEGER NOT NULL DEFAULT 0,
+                is_bluray     INTEGER NOT NULL DEFAULT 0,
+                is_remux      INTEGER NOT NULL DEFAULT 0,
+                framerate     TEXT NOT NULL DEFAULT '',
+                cover_path    TEXT NOT NULL DEFAULT '',
+                cover_url     TEXT NOT NULL DEFAULT '',
+                download_url  TEXT NOT NULL DEFAULT '',
+                download_urls TEXT NOT NULL DEFAULT '[]',
+                javdb_id      TEXT NOT NULL DEFAULT '',
+                category      TEXT NOT NULL DEFAULT 'FT.A.V',
+                source        TEXT NOT NULL DEFAULT '',
+                note          TEXT NOT NULL DEFAULT '',
+                created_at    TEXT NOT NULL,
+                updated_at    TEXT NOT NULL,
+                UNIQUE(code, category)
+            )
+            """
+        )
+        conn.execute(
+            """INSERT INTO movies_new SELECT
+                id, code, title, actress, release_date, added_at, resolution,
+                is_original, is_bluray, is_remux, framerate, cover_path, cover_url,
+                download_url, download_urls, javdb_id, category, source, note,
+                created_at, updated_at FROM movies"""
+        )
+        conn.execute("DROP TABLE movies")
+        conn.execute("ALTER TABLE movies_new RENAME TO movies")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
+
+
 def init_db():
     conn = connect()
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS movies (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            code          TEXT NOT NULL UNIQUE,
+            code          TEXT NOT NULL,
             title         TEXT NOT NULL DEFAULT '',
             actress       TEXT NOT NULL DEFAULT '[]',
             release_date  TEXT NOT NULL DEFAULT '',
@@ -86,7 +153,8 @@ def init_db():
             source        TEXT NOT NULL DEFAULT '',
             note          TEXT NOT NULL DEFAULT '',
             created_at    TEXT NOT NULL,
-            updated_at    TEXT NOT NULL
+            updated_at    TEXT NOT NULL,
+            UNIQUE(code, category)
         )
         """
     )
@@ -109,6 +177,8 @@ def init_db():
         conn.execute("ALTER TABLE movies ADD COLUMN javdb_id TEXT NOT NULL DEFAULT ''")
     if "category" not in cols:
         conn.execute("ALTER TABLE movies ADD COLUMN category TEXT NOT NULL DEFAULT 'FT.A.V'")
+    # 旧库是 code 全局唯一；升级为 (code, category) 复合唯一，让两个栏目番号独立
+    _migrate_code_unique_per_category(conn)
 
     # 多账号：用户名 + 密码哈希，last_date 记录该账号最近操作的日期分组
     conn.execute(
@@ -329,6 +399,14 @@ def create_movie(data):
 def update_movie(movie_id, data):
     d = _normalize(data)
     conn = connect()
+    # 同一栏目内番号冲突时给出友好提示（跨栏目同番号是允许的）
+    dup = conn.execute(
+        "SELECT id FROM movies WHERE code=? AND category=? AND id!=?",
+        (d["code"], d["category"], movie_id),
+    ).fetchone()
+    if dup:
+        conn.close()
+        raise ValueError(f"编号 {d['code']} 在本栏目已存在（跨栏目可以同番号）")
     conn.execute(
         """UPDATE movies SET
              code=:code,title=:title,actress=:actress,release_date=:release_date,added_at=:added_at,
