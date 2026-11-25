@@ -485,7 +485,8 @@ function openModal(id = null) {
   $('fetchStatus').hidden = true;
   $('preview').hidden = true;
   $('previewCover').removeAttribute('src');
-  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fFramerate','fNote'].forEach(i => $(i).value = '');
+  ['fCode','fCode2','fTitle','fActress','fRelease','fAdded','fNote'].forEach(i => $(i).value = '');
+  $('fFps60').checked = false;
   renderDownloadRows([]);
   $('fCategory').value = currentCategory === 'LTX破解' ? 'LTX破解' : 'FT.A.V';
   $('fRes4K').checked = false;
@@ -510,7 +511,8 @@ function openModal(id = null) {
       const resText = (m.resolution || '').toUpperCase();
       $('fRes4K').checked = resText.includes('4K');
       $('fRes1080').checked = resText.includes('1080');
-      $('fFramerate').value = String(m.framerate || '').replace(/fps$/i, '').trim();
+      // 旧数据 framerate 可能是 60 / 59.94 / 60fps，均视为 60fps 勾选
+      $('fFps60').checked = /^(60|59\.94)(\.0+)?$/i.test(String(m.framerate || '').trim().replace(/fps$/i, ''));
       $('fOriginal').checked = !!m.is_original;
       $('fBluray').checked = !!m.is_bluray;
       $('fRemux').checked = !!m.is_remux;
@@ -657,7 +659,7 @@ async function saveMovie() {
     release_date: $('fRelease').value,
     added_at: $('fAdded').value,
     resolution: [$('fRes4K').checked ? '4K' : '', $('fRes1080').checked ? '1080P' : ''].filter(Boolean).join(','),
-    framerate: $('fFramerate').value.trim().replace(/fps$/i, '').trim(),
+    framerate: $('fFps60').checked ? '60' : '',
     is_original: $('fOriginal').checked ? 1 : 0,
     is_bluray: $('fBluray').checked ? 1 : 0,
     is_remux: $('fRemux').checked ? 1 : 0,
