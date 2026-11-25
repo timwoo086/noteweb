@@ -109,16 +109,18 @@
           <input id="fActress">
           <div class="actress-options" id="actressOptions" hidden></div>
         </div>
-        <div class="form-item"><label>发行时间</label><input type="date" id="fRelease"></div>
-        <div class="form-item"><label>录入时间</label><input type="date" id="fAdded"></div>
-        <div class="form-item"><label>分辨率</label>
+        <div class="form-item"><label>发行时间</label><input type="date" id="fRelease" max="9999-12-31"></div>
+        <div class="form-item"><label>录入时间</label><input type="date" id="fAdded" max="9999-12-31"></div>
+        <div class="form-item">
           <div class="check-row">
             <label><input type="checkbox" id="fRes4K"> 4K</label>
             <label><input type="checkbox" id="fRes1080"> 1080P</label>
           </div>
         </div>
-        <div class="form-item"><label>帧率</label>
-          <div class="fps-input"><input type="text" id="fFramerate" placeholder="如 59.94"><span>fps</span></div>
+        <div class="form-item">
+          <div class="check-row">
+            <label><input type="checkbox" id="fFps60"> 60fps</label>
+          </div>
         </div>
         <div class="form-item check-item"><label><input type="checkbox" id="fOriginal"> 原盘</label></div>
         <div class="form-item check-item"><label><input type="checkbox" id="fBluray"> 蓝光</label></div>
